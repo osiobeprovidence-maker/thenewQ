@@ -75,7 +75,7 @@ export function Navbar({
         {/* Zone 2: Clean Single-Line Navigation Links */}
         <nav
           aria-label="Primary navigation"
-          className="hidden md:flex items-center gap-5 lg:gap-7 text-sm font-medium text-[#B3B3B3]"
+          className="hidden lg:flex items-center gap-5 lg:gap-7 text-sm font-medium text-[#B3B3B3]"
         >
           {SECTION_LINKS.map((item) => (
             <button
@@ -120,7 +120,7 @@ export function Navbar({
           <button
             type="button"
             onClick={handleJoinClick}
-            className="hidden md:inline-flex items-center justify-center rounded-full bg-[#1DB954] px-5 py-2.5 text-sm font-bold text-black transition-all duration-150 hover:bg-[#15803D] hover:text-white active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1DB954] focus-visible:ring-offset-2 focus-visible:ring-offset-black whitespace-nowrap shrink-0 cursor-pointer"
+            className="hidden lg:inline-flex items-center justify-center rounded-full bg-[#1DB954] px-5 py-2.5 text-sm font-bold text-black transition-all duration-150 hover:bg-[#15803D] hover:text-white active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1DB954] focus-visible:ring-offset-2 focus-visible:ring-offset-black whitespace-nowrap shrink-0 cursor-pointer"
           >
             Join Now
           </button>
@@ -128,7 +128,7 @@ export function Navbar({
           <button
             type="button"
             onClick={() => setMobileMenuOpen((prev) => !prev)}
-            className="inline-flex md:hidden items-center justify-center rounded-lg p-2.5 min-w-[44px] min-h-[44px] text-[#B3B3B3] hover:text-white hover:bg-[#181818] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1DB954] cursor-pointer"
+            className="inline-flex lg:hidden items-center justify-center rounded-lg p-2.5 min-w-[44px] min-h-[44px] text-[#B3B3B3] hover:text-white hover:bg-[#181818] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1DB954] cursor-pointer"
             aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
             aria-expanded={mobileMenuOpen}
             aria-controls="mobile-nav-drawer"
@@ -142,7 +142,7 @@ export function Navbar({
       {mobileMenuOpen && (
         <div
           id="mobile-nav-drawer"
-          className="md:hidden border-t border-white/10 bg-[#121212] px-4 py-4"
+          className="lg:hidden border-t border-white/10 bg-[#121212] px-4 py-4"
         >
           <nav aria-label="Mobile navigation" className="flex flex-col gap-1">
             {SECTION_LINKS.map((item) => (

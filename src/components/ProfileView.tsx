@@ -19,12 +19,16 @@ import {
   Plus,
   RefreshCw,
   Send,
+  Settings,
   UserCheck,
   UserPlus,
   Users,
+  UsersRound,
   X,
   XCircle,
 } from 'lucide-react';
+import { MarketplaceView } from './MarketplaceView';
+import { SettingsView } from './SettingsView';
 import {
   BILLING_DURATIONS,
   addMonthsToIso,
@@ -69,7 +73,14 @@ interface ProfileViewProps {
 }
 
 type HistoryFilter = 'all' | 'renewal' | 'gift';
-type ProfileSubView = 'overview' | 'inbox' | 'invite' | 'gift' | 'renew';
+type ProfileSubView =
+  | 'overview'
+  | 'inbox'
+  | 'invite'
+  | 'gift'
+  | 'renew'
+  | 'settings'
+  | 'marketplace';
 
 interface PendingConfirmation {
   mode: 'renewal' | 'gift';
@@ -107,6 +118,7 @@ export function ProfileView({
   onPayForSomebody,
 }: ProfileViewProps) {
   const [subView, setSubView] = useState<ProfileSubView>('overview');
+  const [mockPassword, setMockPassword] = useState<string | null>(null);
   const [selectedSubId, setSelectedSubId] = useState<string>(subscriptions[0]?.id ?? '');
   const [selectedDuration, setSelectedDuration] = useState<BillingDurationMonths>(1);
   const [selectedInboxId, setSelectedInboxId] = useState<string>(inboxMessages[0]?.id ?? '');
@@ -663,6 +675,24 @@ export function ProfileView({
             )}
           </div>
         </div>
+      )}
+
+      {subView === 'settings' && (
+        <SettingsView
+          phoneNumber={profile.whatsappNumber}
+          passwordConfigured={mockPassword !== null}
+          onBack={() => openSubPage('overview')}
+          onSetPassword={setMockPassword}
+          onChangePassword={(currentPassword, newPassword) => {
+            if (mockPassword !== currentPassword) return false;
+            setMockPassword(newPassword);
+            return true;
+          }}
+        />
+      )}
+
+      {subView === 'marketplace' && (
+        <MarketplaceView onBackToProfile={() => openSubPage('overview')} />
       )}
 
       {/* SUB-VIEW 2: DEDICATED INVITE SOMEBODY PAGE (MATCHING INBOX DESIGN) */}
@@ -1360,6 +1390,26 @@ export function ProfileView({
                       {unreadCount}
                     </span>
                   )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => openSubPage('settings')}
+                  aria-label="Open account settings"
+                  title="Settings"
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/15 bg-[#181818] text-white transition-colors hover:border-[#1DB954] hover:text-[#1DB954] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1DB954] cursor-pointer"
+                >
+                  <Settings className="h-5 w-5" aria-hidden="true" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => openSubPage('marketplace')}
+                  aria-label="Open subscription marketplace"
+                  title="Marketplace"
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/15 bg-[#181818] text-white transition-colors hover:border-[#1DB954] hover:text-[#1DB954] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1DB954] cursor-pointer"
+                >
+                  <UsersRound className="h-5 w-5" aria-hidden="true" />
                 </button>
 
                 <button

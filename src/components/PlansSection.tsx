@@ -158,11 +158,11 @@ export function PlansSection({
         )}
 
         {/* Subscription Cards Grid */}
-        <div className="mt-10 grid grid-cols-1 gap-6 lg:grid-cols-12">
+        <div className="mt-10 grid auto-rows-fr grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3">
           {filteredPlans.map((plan) => {
             const isAvailable = plan.status === 'available' || plan.status === 'limited';
             const isFeatured = Boolean(plan.featured) && filter === 'all';
-            const colSpanClass = isFeatured ? 'lg:col-span-6' : 'lg:col-span-3';
+            const colSpanClass = isFeatured ? 'xl:col-span-2' : '';
             const filledSlots = Math.max(0, plan.totalSlots - plan.slotsOpen);
             const fillPercent =
               plan.totalSlots > 0 ? Math.round((filledSlots / plan.totalSlots) * 100) : 100;
@@ -170,22 +170,22 @@ export function PlansSection({
             return (
               <article
                 key={plan.id}
-                className={`group flex flex-col justify-between rounded-2xl bg-[#181818] p-6 sm:p-7 transition-all duration-200 ${
+                className={`group box-border flex h-full min-w-0 flex-col rounded-2xl bg-[#181818] p-6 sm:p-7 transition-all duration-200 ${
                   isAvailable
                     ? 'border border-[#1DB954]/50 hover:border-[#1DB954]'
                     : 'border border-white/10 hover:border-white/25'
                 } ${colSpanClass}`}
               >
-                <div>
+                <div className="min-w-0 flex-1">
                   {/* Card Header */}
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-center gap-3.5">
+                  <div className="flex min-w-0 items-start justify-between gap-4">
+                    <div className="flex min-w-0 items-center gap-3.5">
                       <PlanEmblem icon={plan.icon} isAvailable={isAvailable} />
-                      <div>
+                      <div className="min-w-0">
                         <p className="text-xs font-medium text-[#B3B3B3]">
                           {plan.category}
                         </p>
-                        <h3 className="text-xl font-bold text-white tracking-tight">
+                        <h3 className="break-words text-xl font-bold text-white tracking-tight">
                           {plan.name}
                         </h3>
                       </div>
@@ -193,30 +193,30 @@ export function PlansSection({
                   </div>
 
                   {/* Price */}
-                  <div className="mt-6 flex items-baseline gap-1.5">
-                    <span className="font-mono text-3xl sm:text-4xl font-extrabold tracking-tight text-[#1DB954] tabular-nums">
+                  <div className="mt-6 flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+                    <span className="min-w-0 break-words font-mono text-3xl font-extrabold tracking-tight text-[#1DB954] tabular-nums sm:text-4xl">
                       {plan.currencySymbol}
                       {plan.priceMonthly.toLocaleString('en-NG')}
                     </span>
-                    <span className="text-sm font-medium text-[#B3B3B3]">
+                    <span className="break-words text-sm font-medium text-[#B3B3B3]">
                       /{plan.billingCycle}
                     </span>
                   </div>
 
                   {/* Description */}
-                  <p className="mt-3 text-sm sm:text-base text-[#B3B3B3] leading-relaxed">
+                  <p className="mt-3 break-words text-sm leading-relaxed text-[#B3B3B3] sm:text-base">
                     {plan.description}
                   </p>
 
                   {/* Availability Indicator (clean unboxed metadata + icon, zero pill badges) */}
                   <div className="mt-5 pt-5 border-t border-white/10">
-                    <div className="flex items-center gap-2 text-sm font-medium">
+                    <div className="flex min-w-0 items-start gap-2 text-sm font-medium">
                       {isAvailable ? (
                         <CheckCircle2 className="h-4 w-4 text-[#1DB954] shrink-0" aria-hidden="true" />
                       ) : (
                         <Clock className="h-4 w-4 text-[#B3B3B3] shrink-0" aria-hidden="true" />
                       )}
-                      <span className={isAvailable ? 'text-white' : 'text-[#B3B3B3]'}>
+                      <span className={`min-w-0 break-words ${isAvailable ? 'text-white' : 'text-[#B3B3B3]'}`}>
                         {plan.availabilityLabel}
                       </span>
                     </div>
@@ -231,7 +231,7 @@ export function PlansSection({
                           style={{ width: `${fillPercent}%` }}
                         />
                       </div>
-                      <p className="mt-1.5 text-xs text-[#B3B3B3] tabular-nums">
+                      <p className="mt-1.5 break-words text-xs text-[#B3B3B3] tabular-nums">
                         {isAvailable
                           ? `${plan.slotsOpen} of ${plan.totalSlots} slots open in current queue`
                           : `0 of ${plan.totalSlots} slots open · Accepting waitlist requests`}
@@ -249,26 +249,33 @@ export function PlansSection({
                           }`}
                           aria-hidden="true"
                         />
-                        <span>{highlight}</span>
+                        <span className="min-w-0 break-words">{highlight}</span>
                       </li>
                     ))}
                   </ul>
                 </div>
 
                 {/* Card Footer CTA */}
-                <div className="mt-7 pt-5 border-t border-white/10">
+                <div className="mt-7 border-t border-white/10 pt-5">
                   <button
                     type="button"
                     onClick={() => onSelectPlan(plan)}
-                    className={`w-full min-h-[46px] rounded-full px-5 py-3 text-sm font-bold transition-all duration-150 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1DB954] focus-visible:ring-offset-2 focus-visible:ring-offset-[#181818] cursor-pointer whitespace-nowrap ${
+                    className={`box-border flex min-h-[46px] w-full min-w-0 flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5 rounded-full px-4 py-3 text-center text-sm font-bold leading-snug transition-all duration-150 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1DB954] focus-visible:ring-offset-2 focus-visible:ring-offset-[#181818] cursor-pointer ${
                       isAvailable
                         ? 'bg-[#1DB954] text-black hover:bg-[#15803D] hover:text-white'
                         : 'border border-white/20 bg-[#121212] text-white hover:border-[#1DB954] hover:text-[#1DB954]'
                     }`}
                   >
-                    {isAvailable ? 'Join Slot' : `Join Waitlist · ${formatPlanPrice(plan)}`}
+                    <span className="min-w-0 break-words">
+                      {isAvailable ? 'Join Slot' : 'Join Waitlist'}
+                    </span>
+                    {!isAvailable && (
+                      <span className="min-w-0 break-words text-xs font-medium">
+                        · {formatPlanPrice(plan)}
+                      </span>
+                    )}
                   </button>
-                  <p className="mt-3 text-xs leading-relaxed text-[#B3B3B3]">
+                  <p className="mt-3 break-words text-xs leading-relaxed text-[#B3B3B3]">
                     {plan.eligibilityNote}
                   </p>
                 </div>

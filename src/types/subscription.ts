@@ -140,7 +140,6 @@ export interface UserProfile {
   whatsappNumber: string;
   joinedAt: string;
   inviteCode: string;
-  password?: string;
 }
 
 export interface ActiveSubscription {
