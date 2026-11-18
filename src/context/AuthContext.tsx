@@ -15,6 +15,7 @@ import {
   EmailAuthProvider,
   linkWithCredential,
   updatePassword,
+  updatePhoneNumber,
 } from 'firebase/auth';
 import { auth } from '../lib/firebase.js';
 import { checkMyPendingStaffInvitation, fetchStaffAccess } from '../lib/staffAccess';
@@ -225,12 +226,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     const phoneCredential = PhoneAuthProvider.credential(verificationId, code.trim());
-    try {
-      await linkWithCredential(currentUser, phoneCredential);
-    } catch (linkError: any) {
-      // If phone is already linked to this exact account, proceed
-      if (linkError.code !== 'auth/provider-already-linked') {
-        throw linkError;
+    if (currentUser.phoneNumber) {
+      await updatePhoneNumber(currentUser, phoneCredential);
+    } else {
+      try {
+        await linkWithCredential(currentUser, phoneCredential);
+      } catch (linkError: any) {
+        // The same account may already have a phone provider linked.
+        if (linkError.code !== 'auth/provider-already-linked') throw linkError;
       }
     }
 
@@ -289,9 +292,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .update(updates)
       .eq('user_id', currentUser.uid);
 
-    if (error) {
-      console.warn('Could not update profile in Supabase:', error);
-    }
+    if (error) throw error;
 
     setProfile(updatedProfile as UserProfileData);
   };

@@ -145,6 +145,9 @@ export default function App() {
     isSupport,
     hasPendingStaffInvite,
     refreshProfile,
+    setupPhoneRecaptcha,
+    sendPhoneOtp,
+    verifyAndLinkPhone,
   } = useAuth();
   const [currentView, setCurrentView] = useState<AppView>('landing');
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -1277,6 +1280,9 @@ export default function App() {
             onSimulateAdminMessage={handleSimulateAdminMessage}
             onSendInvite={handleSendInvite}
             onPayForSomebody={handlePayForSomebody}
+            setupPhoneRecaptcha={setupPhoneRecaptcha}
+            sendPhoneOtp={sendPhoneOtp}
+            verifyAndLinkPhone={verifyAndLinkPhone}
           />
         )}
 
