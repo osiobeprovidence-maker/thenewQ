@@ -13,11 +13,17 @@ import { PlansSection } from './components/PlansSection';
 import { OnboardingFlow } from './components/OnboardingFlow';
 import { ProfileView } from './components/ProfileView';
 import { useAuth } from './context/AuthContext';
-import { fetchLiveSubscriptionPlans, fetchUserTransactions } from './lib/subscriptionService';
+import {
+  claimGiftedMemberships,
+  fetchLiveSubscriptionPlans,
+  fetchUserMemberships,
+  fetchUserTransactions,
+} from './lib/subscriptionService';
 import { startBachsCheckout, fetchReservationStatus, cancelMyMembership } from './lib/paymentProvider';
 import {
   DEFAULT_SUPPORT_PERMISSIONS,
   FAQ_ITEMS,
+  addMonthsToIso,
   formatPlanPrice,
 } from './data/subscriptions';
 import {
@@ -172,16 +178,24 @@ export default function App() {
         const records = (rows ?? []).map((r: Record<string, unknown>) => {
           const metadata = (r.metadata as Record<string, unknown>) ?? {};
           const rawStatus = (r.status as string) || 'pending';
+          const rawMonths = Number(metadata.duration_months ?? 1);
+          const months: BillingDurationMonths = [1, 3, 6, 12].includes(rawMonths)
+            ? (rawMonths as BillingDurationMonths)
+            : 1;
+          const recipientName = typeof metadata.recipient_name === 'string'
+            ? metadata.recipient_name
+            : undefined;
           return {
             id: String(r.id ?? ''),
             referenceId: (r.provider_reference as string) || String(r.id ?? ''),
             date: (r.created_at as string) ?? new Date().toISOString(),
             planName: (metadata.product_name as string) || 'Subscription',
-            durationLabel: '1 month',
-            months: 1 as BillingDurationMonths,
+            durationLabel: `${months} ${months === 1 ? 'month' : 'months'}`,
+            months,
             amount: Number(r.amount ?? 0),
             currencySymbol: (r.currency as string) === 'NGN' ? '₦' : '$',
-            kind: 'initial' as const,
+            kind: recipientName ? ('gift' as const) : ('initial' as const),
+            recipientName,
             status:
               rawStatus === 'success' || rawStatus === 'confirmed'
                 ? ('Confirmed' as const)
@@ -198,6 +212,69 @@ export default function App() {
       });
   };
 
+  const refreshUserMemberships = async (uid: string) => {
+    const rows = await fetchUserMemberships(uid);
+    const mapped = (rows as Array<Record<string, any>>).flatMap((row) => {
+      const slot = Array.isArray(row.slots) ? row.slots[0] : row.slots;
+      const product = slot?.subscription_products;
+      if (!slot || !product) return [];
+      const joinedAt = String(row.joined_at ?? new Date().toISOString());
+      const matchingPlan = plans.find((plan) => plan.id === product.id);
+      const plan: SubscriptionPlan = matchingPlan ?? {
+        id: String(product.id),
+        name: String(product.name ?? 'Subscription'),
+        category: String(product.category ?? 'Subscription'),
+        description: String(product.description ?? ''),
+        priceMonthly: Number(product.monthly_price ?? 0),
+        currencySymbol: product.currency === 'NGN' ? '₦' : '$',
+        billingCycle: 'month',
+        status: 'available',
+        availabilityLabel: 'Available',
+        slotsOpen: 0,
+        totalSlots: Number(slot.capacity ?? 6),
+        eligibilityNote: String(product.eligibility_note ?? ''),
+        highlights: Array.isArray(product.highlights) ? product.highlights : [],
+        icon: product.icon === 'play-stream' || product.icon === 'spotify-wave' ? product.icon : 'music-disc',
+      };
+      const bills = Array.isArray(row.membership_bills) ? row.membership_bills : [];
+      const dueDate = bills
+        .map((bill: Record<string, unknown>) => String(bill.due_date ?? ''))
+        .filter(Boolean)
+        .sort((a: string, b: string) => b.localeCompare(a))[0];
+      const durationValue = Number(row.duration_months ?? 1);
+      const duration: BillingDurationMonths = [1, 3, 6, 12].includes(durationValue)
+        ? (durationValue as BillingDurationMonths)
+        : 1;
+      return [{
+        id: String(row.id),
+        referenceId: String(row.reference_id ?? row.id),
+        plan,
+        status: row.status === 'cancelled' ? 'cancelled' : row.approval_status === 'pending' ? 'waitlist' : 'active',
+        joinedAt,
+        nextRenewalDate: dueDate ? new Date(dueDate).toISOString() : addMonthsToIso(joinedAt, duration),
+        lastDurationMonths: duration,
+        payerType:
+          row.payer_user_id === uid &&
+          row.recipient_email &&
+          String(row.recipient_email).toLowerCase() !== (currentUser?.email ?? '').toLowerCase()
+            ? 'recipient'
+            : 'self',
+        recipientName: row.recipient_name ? String(row.recipient_name) : undefined,
+        recipientEmail: row.recipient_email ? String(row.recipient_email) : undefined,
+        recipientWhatsapp: row.recipient_phone ? String(row.recipient_phone) : undefined,
+        note: row.gift_note ? String(row.gift_note) : undefined,
+        giftClaimed:
+          row.beneficiary_user_id !== row.payer_user_id ||
+          String(row.recipient_email ?? '').toLowerCase() === (currentUser?.email ?? '').toLowerCase(),
+        groupId: String(slot.id),
+        groupCode: slot.group_code ? String(slot.group_code) : undefined,
+        groupName: slot.group_name ? String(slot.group_name) : undefined,
+        cancelledAt: row.status === 'cancelled' ? String(row.updated_at ?? joinedAt) : undefined,
+      } satisfies ActiveSubscription];
+    });
+    setActiveSubscriptions(mapped);
+  };
+
   useEffect(() => {
     refreshPlans();
     refreshTransactions();
@@ -206,6 +283,17 @@ export default function App() {
   useEffect(() => {
     refreshPaymentHistory();
   }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser) {
+      setActiveSubscriptions([]);
+      return;
+    }
+    void refreshUserMemberships(currentUser.uid).catch((error) => {
+      console.warn('Could not load your subscriptions:', error);
+      setActiveSubscriptions([]);
+    });
+  }, [currentUser, plans]);
 
   useEffect(() => {
     let mounted = true;
@@ -321,7 +409,6 @@ export default function App() {
 
     startBachsCheckout({
       productId: plan.id,
-      beneficiaryUserId: currentUser?.uid,
       preferredGroupCode: formData.groupCode?.trim().toUpperCase() || undefined,
       successUrl: `${window.location.origin}/?payment-ref=PENDING`,
       customerEmail: formData.email.trim(),
@@ -357,6 +444,10 @@ export default function App() {
         if (s.status === 'fulfilled') {
           window.clearInterval(id);
           window.history.replaceState({}, '', window.location.pathname);
+          void refreshUserMemberships(currentUser.uid);
+          refreshPaymentHistory();
+          refreshGroups();
+          refreshPlans();
           setOrderStep('success');
           setCompletedOrder({
             referenceId: ref,
@@ -385,7 +476,7 @@ export default function App() {
     return () => window.clearInterval(id);
     // Only run on mount / user change
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser]);
+    }, [currentUser]);
 
   const handleDoneToProfile = () => {
     setOrderModalOpen(false);
@@ -407,51 +498,73 @@ export default function App() {
     setOrderStep('form');
   };
 
-  const handleCancelSubscriptionSlot = (subscriptionId: string) => {
+  const handleCancelSubscriptionSlot = async (subscriptionId: string) => {
     const targetSub = activeSubscriptions.find((s) => s.id === subscriptionId);
     if (!targetSub || targetSub.status === 'cancelled') return;
-
-    // In live checkout mode, persist the cancellation before flipping UI state.
-    // In live checkout mode, persist the cancellation before flipping UI state.
-    if (currentUser) {
-      cancelMyMembership({ referenceId: targetSub.referenceId }).catch((err) => {
-        console.error('[App] cancelMyMembership failed:', err);
-      });
+    if (!currentUser) throw new Error('Sign in to manage this subscription.');
+    const result = await cancelMyMembership({ membershipId: targetSub.id });
+    if (!result.cancelled || !result.persisted) {
+      throw new Error(result.error || 'Cancellation could not be saved. Please try again.');
     }
+    await Promise.all([
+      refreshUserMemberships(currentUser.uid),
+      Promise.resolve(refreshGroups()),
+      Promise.resolve(refreshPlans()),
+    ]);
+  };
 
-    const cancelledAt = new Date().toISOString();
-    setActiveSubscriptions((prev) =>
-      prev.map((sub) =>
-        sub.id === subscriptionId
-          ? {
-              ...sub,
-              status: 'cancelled',
-              cancelledAt,
-            }
-          : sub
-      )
-    );
-
-    if (targetSub.groupId) {
-      setGroups((prev) =>
-        prev.map((grp) =>
-          grp.id !== targetSub.groupId
-            ? grp
-            : {
-                ...grp,
-                members: grp.members.map((m) =>
-                  m.linkedSubscriptionId === subscriptionId
-                    ? { ...m, paymentStatus: 'Cancelled', isLeader: false }
-                    : m
-                ),
-              }
-        )
-      );
+  const handleRestartSubscription = (planId: string) => {
+    const plan = plans.find((item) => item.id === planId && livePlanIds.has(item.id));
+    if (!plan) {
+      window.alert('This subscription plan is no longer available for secure checkout. Contact support for help.');
+      return;
     }
+    setFormData({
+      ...INITIAL_FORM_DATA,
+      planId: plan.id,
+      fullName: userProfile?.fullName ?? '',
+      email: userProfile?.email ?? currentUser?.email ?? '',
+      whatsappNumber: userProfile?.whatsappNumber ?? '',
+    });
+    setOrderStep('form');
+    setCheckoutError(null);
+    setOrderModalOpen(true);
+  };
 
-    if (targetSub.status === 'active') {
-      restoreOnePlanSlot(targetSub.plan.id);
+  const handleStartGiftCheckout = async (input: {
+    planId: string;
+    durationMonths: BillingDurationMonths;
+    recipientName: string;
+    recipientEmail: string;
+    recipientPhone: string;
+    note: string;
+  }) => {
+    if (!currentUser) throw new Error('Sign in before paying for someone else.');
+    if (!livePlanIds.has(input.planId)) {
+      throw new Error('This plan is not available for secure checkout yet. No payment was taken.');
     }
+    const result = await startBachsCheckout({
+      productId: input.planId,
+      durationMonths: input.durationMonths,
+      recipientName: input.recipientName,
+      recipientEmail: input.recipientEmail,
+      recipientPhone: input.recipientPhone,
+      giftNote: input.note,
+      successUrl: `${window.location.origin}/?payment-ref=PENDING`,
+      customerEmail: currentUser.email ?? undefined,
+      customerName: currentUser.displayName ?? undefined,
+    });
+    if (!result.ok || !result.checkoutUrl) {
+      throw new Error(result.ok ? 'Malformed response from payment server.' : result.error);
+    }
+    window.location.assign(result.checkoutUrl);
+  };
+
+  const handleClaimGiftedSubscriptions = async () => {
+    const claimedCount = await claimGiftedMemberships();
+    if (currentUser) await refreshUserMemberships(currentUser.uid);
+    refreshGroups();
+    return claimedCount;
   };
 
   const handleMarkInboxRead = (messageId: string, isRead: boolean) => {
@@ -783,6 +896,9 @@ export default function App() {
             staffAccess={staffAccess}
             designatedSuperAdminAvailable={designatedSuperAdminAvailable && staffAccess === null}
             onCancelSubscriptionSlot={handleCancelSubscriptionSlot}
+            onRestartSubscription={handleRestartSubscription}
+            onClaimGiftedSubscriptions={handleClaimGiftedSubscriptions}
+            onStartGiftCheckout={handleStartGiftCheckout}
             onMarkInboxRead={handleMarkInboxRead}
             onSendInvite={handleSendInvite}
             phoneVerified={authProfile?.phone_verified ?? false}

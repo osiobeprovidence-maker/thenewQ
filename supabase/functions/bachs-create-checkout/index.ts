@@ -5,7 +5,7 @@
  * Contract (matches the storefront's paymentProvider):
  *   POST /functions/v1/bachs-create-checkout
  *   Authorization: Bearer <Firebase ID token>
- *   body: { productId, beneficiaryUserId?, preferredGroupCode?, successUrl?, customerEmail?, customerName? }
+ *   body: { productId, preferredGroupCode?, successUrl?, customerEmail?, customerName?, durationMonths?, recipientName?, recipientEmail?, recipientPhone?, giftNote? }
  *   → 200 { id, checkoutUrl, reference, status }
  *
  * Security model (identical guarantees to the retired Firebase callable):
@@ -113,10 +113,29 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   const productId = typeof input.productId === 'string' ? input.productId.trim() : '';
-  const beneficiaryUserId =
-    typeof input.beneficiaryUserId === 'string' && input.beneficiaryUserId.trim()
-      ? input.beneficiaryUserId.trim()
-      : callerUid;
+  // Gifts start assigned to the payer. The recipient can claim the membership
+  // later using the same verified email address supplied here.
+  const beneficiaryUserId = callerUid;
+  const durationMonths = Number(input.durationMonths ?? 1);
+  if (![1, 3, 6, 12].includes(durationMonths)) {
+    return json({ error: 'Choose a valid payment duration.' }, 400, origin);
+  }
+  const recipientName = typeof input.recipientName === 'string' ? input.recipientName.trim() : '';
+  const recipientEmail = typeof input.recipientEmail === 'string'
+    ? input.recipientEmail.trim().toLowerCase()
+    : '';
+  const recipientPhone = typeof input.recipientPhone === 'string' ? input.recipientPhone.trim() : '';
+  const giftNote = typeof input.giftNote === 'string' ? input.giftNote.trim().slice(0, 500) : '';
+  const hasGiftDetails = Boolean(recipientName || recipientEmail || recipientPhone || giftNote);
+  if (hasGiftDetails && (!recipientName || !recipientEmail)) {
+    return json({ error: 'Enter the recipient’s name and email to make a gift payment.' }, 400, origin);
+  }
+  if (recipientEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail)) {
+    return json({ error: 'Enter a valid recipient email address.' }, 400, origin);
+  }
+  if (recipientEmail && !recipientName) {
+    return json({ error: 'Enter the recipient’s name.' }, 400, origin);
+  }
   const preferredGroupCode =
     typeof input.preferredGroupCode === 'string' && input.preferredGroupCode.trim()
       ? input.preferredGroupCode.trim()
@@ -160,7 +179,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     currency: string;
   };
 
-  const amount = Number(product.monthly_price);
+  const amount = Number(product.monthly_price) * durationMonths;
   if (!Number.isFinite(amount) || amount <= 0) {
     console.error('Invalid product price from database:', product);
     return json({ error: 'Subscription product price is invalid.' }, 500, origin);
@@ -200,6 +219,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
       expected_currency: currency,
       reference_id: reference,
       preferred_group_code: preferredGroupCode,
+      duration_months: durationMonths,
+      recipient_name: recipientName || null,
+      recipient_email: recipientEmail || null,
+      recipient_phone: recipientPhone || null,
+      gift_note: giftNote || null,
       status: 'pending',
       expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
     }),
@@ -236,6 +260,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
           payerUserId: callerUid,
           beneficiaryUserId,
           productId: product.id,
+          durationMonths,
+          recipientEmail: recipientEmail || undefined,
         },
       }),
     });

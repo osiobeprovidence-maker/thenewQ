@@ -148,9 +148,19 @@ export async function fetchAdminGroups(): Promise<SubscriptionGroup[]> {
             : 'Unpaid';
       return {
         id: String(m.id ?? ''),
-        fullName: profile?.display_name?.trim() || profile?.username?.trim() || 'Member',
-        email: profile?.email ?? '',
-        whatsappNumber: profile?.phone ? normalizePhoneNumber(profile.phone) : '',
+        fullName:
+          ((m.beneficiary_user_id as string) === (m.payer_user_id as string)
+            ? (m.recipient_name as string | null)
+            : null)?.trim() || profile?.display_name?.trim() || profile?.username?.trim() || 'Member',
+        email:
+          ((m.beneficiary_user_id as string) === (m.payer_user_id as string)
+            ? (m.recipient_email as string | null)
+            : null) ?? profile?.email ?? '',
+        whatsappNumber: normalizePhoneNumber(
+          ((m.beneficiary_user_id as string) === (m.payer_user_id as string)
+            ? (m.recipient_phone as string | null)
+            : null) ?? profile?.phone ?? ''
+        ),
         referenceId: (m.reference_id as string) || `MEM-${String(m.id ?? '').slice(0, 8).toUpperCase()}`,
         isLeader: Boolean(m.is_leader),
         paymentStatus,

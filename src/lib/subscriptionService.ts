@@ -112,7 +112,8 @@ export async function fetchUserMemberships(userId: string) {
         slots (
           *,
           subscription_products (*)
-        )
+        ),
+        membership_bills (due_date)
       `)
       .or(`beneficiary_user_id.eq.${userId},payer_user_id.eq.${userId}`);
 
@@ -125,6 +126,13 @@ export async function fetchUserMemberships(userId: string) {
     console.error('Error fetching memberships:', e);
     return [];
   }
+}
+
+/** Claims any unclaimed gifts addressed to the signed-in, verified email. */
+export async function claimGiftedMemberships(): Promise<number> {
+  const { data, error } = await supabase.rpc('claim_my_gifted_memberships');
+  if (error) throw new Error(error.message);
+  return Number((data as Record<string, unknown> | null)?.claimed_count ?? 0);
 }
 
 /**

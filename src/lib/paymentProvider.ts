@@ -19,11 +19,15 @@ const CHECKOUT_TIMEOUT_MS = 15_000;
 
 export interface StartCheckoutParams {
   productId: string;
-  beneficiaryUserId?: string;
   preferredGroupCode?: string;
   successUrl?: string;
   customerEmail?: string;
   customerName?: string;
+  durationMonths?: number;
+  recipientName?: string;
+  recipientEmail?: string;
+  recipientPhone?: string;
+  giftNote?: string;
 }
 
 export type StartCheckoutResult =
@@ -66,11 +70,15 @@ export async function startBachsCheckout(
         },
         body: JSON.stringify({
           productId: params.productId,
-          beneficiaryUserId: params.beneficiaryUserId,
           preferredGroupCode: params.preferredGroupCode,
           successUrl: params.successUrl,
           customerEmail: params.customerEmail,
           customerName: params.customerName,
+          durationMonths: params.durationMonths ?? 1,
+          recipientName: params.recipientName,
+          recipientEmail: params.recipientEmail,
+          recipientPhone: params.recipientPhone,
+          giftNote: params.giftNote,
         }),
         signal: controller.signal,
       });

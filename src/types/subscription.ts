@@ -165,6 +165,7 @@ export interface ActiveSubscription {
   recipientName?: string;
   recipientEmail?: string;
   recipientWhatsapp?: string;
+  giftClaimed?: boolean;
   note?: string;
   groupId?: string;
   groupCode?: string;

@@ -70,9 +70,19 @@ interface ProfileViewProps {
   staffAccess?: 'superAdmin' | 'admin' | 'support' | null;
   /** Designated bootstrap account that may claim super admin access. */
   designatedSuperAdminAvailable?: boolean;
-  onCancelSubscriptionSlot: (subscriptionId: string) => void;
+  onCancelSubscriptionSlot: (subscriptionId: string) => Promise<void>;
+  onRestartSubscription: (planId: string) => void;
   onMarkInboxRead: (messageId: string, isRead: boolean) => void;
   onSendInvite: (name: string, contact: string) => void;
+  onClaimGiftedSubscriptions: () => Promise<number>;
+  onStartGiftCheckout: (input: {
+    planId: string;
+    durationMonths: BillingDurationMonths;
+    recipientName: string;
+    recipientEmail: string;
+    recipientPhone: string;
+    note: string;
+  }) => Promise<void>;
   phoneVerified: boolean;
   onSavePhone: (phone: string) => Promise<void>;
   setupPhoneRecaptcha: (containerId: string) => RecaptchaVerifier;
@@ -105,8 +115,11 @@ export function ProfileView({
   staffAccess,
   designatedSuperAdminAvailable,
   onCancelSubscriptionSlot,
+  onRestartSubscription,
   onMarkInboxRead,
   onSendInvite,
+  onClaimGiftedSubscriptions,
+  onStartGiftCheckout,
   phoneVerified,
   onSavePhone,
   setupPhoneRecaptcha,
@@ -204,9 +217,12 @@ export function ProfileView({
   const [recipientWhatsapp, setRecipientWhatsapp] = useState('');
   const [giftNote, setGiftNote] = useState('');
   const [giftError, setGiftError] = useState<string | null>(null);
+  const [giftCheckoutBusy, setGiftCheckoutBusy] = useState(false);
 
   // Cancel confirmation modal & banner feedback
   const [pendingCancelSub, setPendingCancelSub] = useState<ActiveSubscription | null>(null);
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const [claimGiftsBusy, setClaimGiftsBusy] = useState(false);
   const [profileNotice, setProfileNotice] = useState<string | null>(null);
 
   useEffect(() => {
@@ -374,16 +390,35 @@ export function ProfileView({
     window.setTimeout(() => setInviteSuccessMsg(null), 4000);
   };
 
-  const handleGiftSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleGiftSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setGiftError('Secure payment for another person is not available yet. No payment was processed or recorded.');
+    if (!giftPlan || !recipientName.trim() || !recipientEmail.trim()) {
+      setGiftError('Choose a plan and enter the recipient’s name and email.');
+      return;
+    }
+    setGiftCheckoutBusy(true);
+    setGiftError(null);
+    try {
+      await onStartGiftCheckout({
+        planId: giftPlan.id,
+        durationMonths: giftDuration,
+        recipientName: recipientName.trim(),
+        recipientEmail: recipientEmail.trim().toLowerCase(),
+        recipientPhone: recipientWhatsapp.trim(),
+        note: giftNote.trim(),
+      });
+    } catch (error) {
+      setGiftError(error instanceof Error ? error.message : 'Could not start secure checkout. Please try again.');
+    } finally {
+      setGiftCheckoutBusy(false);
+    }
   };
 
   const explainRenewalUnavailable = () => {
     setProfileNotice('Secure renewal checkout is not available yet. No payment has been taken or recorded. Please contact the admin for renewal assistance.');
   };
 
-  const handleConfirmCancelSlot = () => {
+  const handleConfirmCancelSlot = async () => {
     if (!pendingCancelSub) return;
     const cancelledPlanName = pendingCancelSub.plan.name;
     const holderSuffix =
@@ -391,12 +426,33 @@ export function ProfileView({
         ? ` for ${pendingCancelSub.recipientName}`
         : '';
 
-    onCancelSubscriptionSlot(pendingCancelSub.id);
-    setPendingCancelSub(null);
-    setSubView('overview');
-    setProfileNotice(
-      `Cancelled ${cancelledPlanName} slot${holderSuffix}. This slot is now marked cancelled. This is not a refund operation.`
-    );
+    setCancelBusy(true);
+    try {
+      await onCancelSubscriptionSlot(pendingCancelSub.id);
+      setPendingCancelSub(null);
+      setSubView('overview');
+      setProfileNotice(
+        `Cancelled ${cancelledPlanName} slot${holderSuffix}. Future renewals are stopped. Past payments are not refunded.`
+      );
+    } catch (error) {
+      setProfileNotice(error instanceof Error ? error.message : 'Could not cancel this subscription. Please try again.');
+    } finally {
+      setCancelBusy(false);
+    }
+  };
+
+  const handleClaimGifts = async () => {
+    setClaimGiftsBusy(true);
+    try {
+      const count = await onClaimGiftedSubscriptions();
+      setProfileNotice(count > 0
+        ? `${count} subscription${count === 1 ? '' : 's'} moved to your account. You can manage them here.`
+        : 'No unclaimed gifts were found for this email. Use the same verified email the buyer entered.');
+    } catch (error) {
+      setProfileNotice(error instanceof Error ? error.message : 'Could not claim gifts for this account.');
+    } finally {
+      setClaimGiftsBusy(false);
+    }
   };
 
   return (
@@ -1101,7 +1157,7 @@ export function ProfileView({
                   Pay for Somebody
                 </h1>
                 <p className="text-xs sm:text-sm text-[#B3B3B3]">
-                  Secure payment for another person is not available yet. No payment is processed from this form.
+                  Pay through secure checkout. The recipient can create an account with the same email, verify it, then claim the subscription from their profile.
                 </p>
               </div>
             </div>
@@ -1225,11 +1281,11 @@ export function ProfileView({
 
               <button
                 type="submit"
-                disabled
-                className="inline-flex w-full sm:w-auto items-center justify-center gap-2 min-h-[48px] rounded-full bg-[#1DB954] px-7 py-3 text-sm font-bold text-black opacity-60 cursor-not-allowed"
+                disabled={giftCheckoutBusy}
+                className="inline-flex w-full sm:w-auto items-center justify-center gap-2 min-h-[48px] rounded-full bg-[#1DB954] px-7 py-3 text-sm font-bold text-black hover:bg-[#15803D] hover:text-white disabled:opacity-60 disabled:cursor-wait"
               >
                 <Gift className="h-4 w-4" aria-hidden="true" />
-                <span>Secure recipient checkout unavailable</span>
+                <span>{giftCheckoutBusy ? 'Opening secure checkout…' : 'Pay securely for recipient'}</span>
               </button>
             </form>
 
@@ -1703,9 +1759,19 @@ export function ProfileView({
                   Select Manage Renewal on any subscription to choose 1 month, 3 months, 6 months, or 1 year.
                 </p>
               </div>
-              <span className="text-xs text-[#B3B3B3] tabular-nums shrink-0">
-                {subscriptions.length} {subscriptions.length === 1 ? 'subscription' : 'subscriptions'}
-              </span>
+              <div className="shrink-0 text-right">
+                <span className="block text-xs text-[#B3B3B3] tabular-nums">
+                  {subscriptions.length} {subscriptions.length === 1 ? 'subscription' : 'subscriptions'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void handleClaimGifts()}
+                  disabled={claimGiftsBusy}
+                  className="mt-2 min-h-[36px] rounded-full border border-[#1DB954]/40 px-3.5 py-1.5 text-xs font-semibold text-[#1DB954] hover:bg-[#1DB954]/10 disabled:opacity-60 cursor-pointer"
+                >
+                  {claimGiftsBusy ? 'Checking gifts…' : 'Claim a purchased subscription'}
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -1816,6 +1882,16 @@ export function ProfileView({
                             <span>Cancel Slot</span>
                           </button>
                         </div>
+                      )}
+                      {isCancelled && (
+                        <button
+                          type="button"
+                          onClick={() => onRestartSubscription(sub.plan.id)}
+                          className="inline-flex w-full items-center justify-center gap-2 min-h-[40px] rounded-full bg-[#1DB954] px-4 py-2 text-xs font-bold text-black transition-colors hover:bg-[#15803D] hover:text-white cursor-pointer"
+                        >
+                          <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                          <span>Restart with secure checkout</span>
+                        </button>
                       )}
                     </div>
                   </div>
@@ -1985,6 +2061,7 @@ export function ProfileView({
               </h3>
               <button
                 type="button"
+                disabled={cancelBusy}
                 onClick={() => setPendingCancelSub(null)}
                 aria-label="Close cancel confirmation"
                 className="flex h-9 w-9 items-center justify-center rounded-full text-[#B3B3B3] hover:bg-[#121212] hover:text-white cursor-pointer"
@@ -2019,11 +2096,12 @@ export function ProfileView({
               </button>
               <button
                 type="button"
+                disabled={cancelBusy}
                 onClick={handleConfirmCancelSlot}
-                className="flex-1 inline-flex items-center justify-center gap-2 min-h-[46px] rounded-full bg-red-500 px-6 py-2.5 text-sm font-bold text-white hover:bg-red-600 transition-colors cursor-pointer"
+                className="flex-1 inline-flex items-center justify-center gap-2 min-h-[46px] rounded-full bg-red-500 px-6 py-2.5 text-sm font-bold text-white hover:bg-red-600 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-wait"
               >
                 <XCircle className="h-4 w-4" aria-hidden="true" />
-                <span>Confirm Cancel Slot</span>
+                <span>{cancelBusy ? 'Cancelling…' : 'Confirm Cancel Slot'}</span>
               </button>
             </div>
           </div>
