@@ -295,13 +295,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Keep contact-number saving usable if production's PostgREST schema cache
     // has not refreshed after phone_verified was added. The phone itself still
     // persists, and the verification flag will sync once that column exists.
-    if (
-      error &&
-      Object.prototype.hasOwnProperty.call(updates, 'phone_verified') &&
-      /phone_verified.*schema cache|schema cache.*phone_verified/i.test(error.message)
-    ) {
+    const optionalProfileColumns = ['phone_verified', 'onboarding_completed'] as const;
+    while (error) {
+      const missingOptionalColumn = optionalProfileColumns.find(
+        (column) =>
+          Object.prototype.hasOwnProperty.call(updates, column) &&
+          new RegExp(`${column}.*schema cache|schema cache.*${column}`, 'i').test(error!.message)
+      );
+      if (!missingOptionalColumn) break;
+
       const compatibleUpdates = { ...updates } as Partial<UserProfileData>;
-      delete compatibleUpdates.phone_verified;
+      delete compatibleUpdates[missingOptionalColumn];
       const retry = await supabase
         .from('profiles')
         .update(compatibleUpdates)
