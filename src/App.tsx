@@ -885,7 +885,9 @@ export default function App() {
                   <>
                     You were invited to group{' '}
                     <strong className="font-mono text-[#1DB954]">{joinCodeFromUrl}</strong>.{' '}
-                    {currentUser ? 'Open your profile to request a seat.' : 'Sign in to request a seat.'}
+                    {currentUser
+                      ? 'Accept the invitation in your profile to request a seat.'
+                      : 'Sign in to accept this invitation.'}
                   </>
                 ) : (
                   <>You were invited to JOIN THE QUEUE. Create an account or sign in to explore available plans.</>
@@ -898,7 +900,7 @@ export default function App() {
                 onClick={() => (currentUser ? openProfileView() : setAuthModalOpen(true))}
                 className="inline-flex items-center min-h-[36px] rounded-full bg-[#1DB954] px-4 py-1.5 text-xs font-bold text-black transition-colors hover:bg-[#15803D] hover:text-white cursor-pointer"
               >
-                {currentUser ? (isGroupInvite ? 'Open join flow' : 'Open My Profile') : (isGroupInvite ? 'Sign In' : 'Create Account')}
+                {currentUser ? (isGroupInvite ? 'Accept Invitation' : 'Open My Profile') : (isGroupInvite ? 'Sign In to Accept' : 'Create Account')}
               </button>
               <button
                 type="button"
