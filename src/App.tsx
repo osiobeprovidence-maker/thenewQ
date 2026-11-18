@@ -309,16 +309,25 @@ export default function App() {
   }, [currentUser, plans]);
 
   useEffect(() => {
+    if (!currentUser) {
+      setGroups([]);
+      return;
+    }
     let mounted = true;
-    fetchAdminGroups()
-      .then((liveGroups) => {
-        if (mounted) setGroups(liveGroups);
-      })
-      .catch((err) => console.warn('Could not load groups:', err));
+    const loadGroups = () => {
+      fetchAdminGroups()
+        .then((liveGroups) => {
+          if (mounted) setGroups(liveGroups);
+        })
+        .catch((err) => console.warn('Could not load groups:', err));
+    };
+    loadGroups();
+    const timer = currentView === 'admin' ? window.setInterval(loadGroups, 10_000) : undefined;
     return () => {
       mounted = false;
+      if (timer !== undefined) window.clearInterval(timer);
     };
-  }, []);
+  }, [currentUser?.uid, currentView]);
 
   // Synchronize authenticated user profile
   useEffect(() => {

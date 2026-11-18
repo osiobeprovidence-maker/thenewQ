@@ -494,6 +494,7 @@ export function AdminView({
   );
 
   const totalMembersCount = allMembers.length;
+  const pendingApprovalCount = allMembers.filter((item) => item.member.approvalStatus === 'pending').length;
   const paidMembersCount = allMembers.filter((item) => item.member.paymentStatus === 'Paid').length;
   const unpaidMembers = allMembers.filter((item) => item.member.paymentStatus === 'Unpaid');
   const unpaidMembersCount = unpaidMembers.length;
@@ -881,13 +882,19 @@ export function AdminView({
                 </p>
               </div>
 
-              <div className="lg:col-span-7 grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="lg:col-span-7 grid grid-cols-2 sm:grid-cols-5 gap-3">
                 {activeTab === 'groups' && (
                   <>
                     <div className="rounded-xl border border-white/10 bg-[#181818] p-3.5">
                       <p className="text-xs text-[#B3B3B3]">Total Members</p>
                       <p className="mt-1 font-mono text-xl font-bold text-[#1DB954] tabular-nums">
                         {totalMembersCount}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-[#181818] p-3.5">
+                      <p className="text-xs text-[#B3B3B3]">Pending Approval</p>
+                      <p className="mt-1 font-mono text-xl font-bold text-amber-300 tabular-nums">
+                        {pendingApprovalCount}
                       </p>
                     </div>
                     <div className="rounded-xl border border-white/10 bg-[#181818] p-3.5">
