@@ -56,17 +56,19 @@ async function verifyWebhookSignature(
   const timeHeader = headers.get('x-bachs-timestamp') ?? '';
 
   let timestamp = timeHeader.trim();
-  let signature = sigHeader.trim();
+  let signatures: string[] = [];
 
   if (sigV2Header) {
     for (const part of sigV2Header.split(',')) {
       const [key, value] = part.split('=', 2).map((s) => s.trim());
       if (key === 't' && !timestamp) timestamp = value;
-      else if (key === 'v1' && !signature) signature = value;
+      else if (key === 'v1' && value) signatures.push(value);
     }
   }
+  // V1 (x-bachs-signature) is a single digest — always consider it too.
+  if (sigHeader.trim()) signatures.push(sigHeader.trim());
 
-  if (!signature || !timestamp) {
+  if (!timestamp || signatures.length === 0) {
     return { isValid: false, error: 'Missing signature or timestamp header' };
   }
 
@@ -76,12 +78,11 @@ async function verifyWebhookSignature(
     return { isValid: false, error: 'Timestamp outside 300s replay tolerance window' };
   }
 
-  return hmacSha256Hex(secret, `${timestamp}.${rawBody}`).then((hex) => {
-    if (!constantTimeEqual(hex, signature)) {
-      return { isValid: false, error: 'Invalid HMAC-SHA256 signature' };
-    }
-    return { isValid: true };
-  });
+  const expected = await hmacSha256Hex(secret, `${timestamp}.${rawBody}`);
+  const ok = signatures.some((sig) => constantTimeEqual(expected, sig));
+  return ok
+    ? { isValid: true }
+    : { isValid: false, error: 'Invalid HMAC-SHA256 signature' };
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -127,18 +128,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
     'Content-Type': 'application/json',
   };
 
-  // ── 3. Dispatch ────────────────────────────────────────────────────────
-  if (eventType !== 'checkout.completed') {
-    // Unknown event type — acknowledge so Bachs stops retrying; do not fulfil.
+  // Bachs delivers both checkout.completed and collection.succeeded; either may
+  // arrive first, and the Postgres fulfilment RPC is idempotent, so handling both
+  // is safe. Everything else is acknowledged without fulfilling.
+  if (eventType !== 'checkout.completed' && eventType !== 'collection.succeeded') {
     return new Response(JSON.stringify({ received: true, ignored: true }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
   }
 
-  const checkoutId = event.data?.checkout_id;
-  if (!checkoutId || typeof checkoutId !== 'string') {
-    return new Response('checkout.completed missing checkout_id', { status: 400 });
+  const checkoutId = typeof event.data?.checkout_id === 'string' ? event.data.checkout_id : undefined;
+  if (!checkoutId) {
+    return new Response(`${eventType} missing checkout_id`, { status: 400 });
   }
 
   // ── 4. Resolve the canonical session directly from Bachs ───────────────

@@ -168,6 +168,22 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const currency = (product.currency || 'NGN').toUpperCase();
   const reference = randomRef();
 
+  // Server-generated redirect: the client cannot know the reference up front, so we
+  // always resolve it here. `{reference}` is substituted; `payment-ref=PENDING` (sent
+  // by the storefront) is replaced with the real reference; missing URL → app default.
+  const appOrigin = Deno.env.get('APP_ORIGIN') ?? 'https://jointhenewq.vercel.app';
+  let finalSuccessUrl = successUrl ?? `${appOrigin}/?payment-ref=PENDING`;
+  finalSuccessUrl = finalSuccessUrl.replaceAll('{reference}', encodeURIComponent(reference));
+  try {
+    const u = new URL(finalSuccessUrl);
+    if (u.searchParams.get('payment-ref') === 'PENDING' || !u.searchParams.get('payment-ref')) {
+      u.searchParams.set('payment-ref', reference);
+    }
+    finalSuccessUrl = u.toString();
+  } catch {
+    finalSuccessUrl = `${appOrigin}/?payment-ref=${encodeURIComponent(reference)}`;
+  }
+
   // ── 4. Authoritative pending reservation (30-minute expiry) ─────────────
   const reservationInsert = await fetch(`${SUPABASE_URL}/rest/v1/slot_reservations`, {
     method: 'POST',
@@ -210,9 +226,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
         Accept: 'application/json',
       },
       body: JSON.stringify({
-        pricing: { amount: amount.toFixed(2), currency },
+        pricing: { currency, amount: amount.toFixed(2) },
         customer: { email: customerEmail, ...(customerName ? { name: customerName } : {}) },
-        success_url: successUrl || undefined,
+        success_url: finalSuccessUrl,
+        reference,
         metadata: {
           reference,
           reservationId: reservationId ?? reference,
@@ -243,13 +260,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     const body = bachsBody as Record<string, unknown>;
     const checkoutUrl = (body.checkout_url ?? body.url) as string | undefined;
+    const checkoutId = (body.checkout_id ?? body.id) as string | undefined;
     if (!checkoutUrl) {
       console.error('Bachs response missing checkout_url:', body);
       return json({ error: 'Payment provider returned an invalid response.' }, 502, origin);
     }
 
     return json(
-      { id: body.id ?? null, checkoutUrl, reference, status: body.status ?? 'pending' },
+      { id: checkoutId ?? null, checkoutUrl, reference, status: body.status ?? 'open' },
       200,
       origin
     );
