@@ -97,13 +97,23 @@ export default function App() {
   } = useAuth();
   const [currentView, setCurrentView] = useState<AppView>('landing');
   const [authModalOpen, setAuthModalOpen] = useState(false);
-  const [joinBannerDismissed, setJoinBannerDismissed] = useState(false);
-  // Read once — the ?join= param drives the invite-landing banner + join flow prefill
-  const joinCodeFromUrl = (() => {
-    const raw = new URLSearchParams(window.location.search).get('join');
-    return raw ? raw.trim().toUpperCase() : null;
+  const [inviteBannerDismissed, setInviteBannerDismissed] = useState(false);
+  // Accept both current query links and older /invite/CODE links.
+  const invitePathCode = (() => {
+    const match = window.location.pathname.match(/^\/invite\/([^/]+)\/?$/i);
+    if (!match) return null;
+    try {
+      return decodeURIComponent(match[1]).trim().toUpperCase();
+    } catch {
+      return null;
+    }
   })();
-  const showJoinBanner = Boolean(joinCodeFromUrl) && !joinBannerDismissed;
+  const urlParams = new URLSearchParams(window.location.search);
+  const joinCodeFromUrl = (urlParams.get('join') ?? invitePathCode ?? '').trim().toUpperCase() || null;
+  const referralCodeFromUrl = (urlParams.get('ref') ?? invitePathCode ?? '').trim().toUpperCase() || null;
+  const isGroupInvite = Boolean(joinCodeFromUrl && /^GFT-\d{4}$/.test(joinCodeFromUrl));
+  const isPersonalInvite = Boolean(referralCodeFromUrl && /^INV-[A-Z0-9]{6}$/.test(referralCodeFromUrl));
+  const showInviteBanner = (isGroupInvite || isPersonalInvite) && !inviteBannerDismissed;
   const [supportPermissions, setSupportPermissions] = useState<SupportPermissions>(
     DEFAULT_SUPPORT_PERMISSIONS
   );
@@ -826,16 +836,22 @@ export default function App() {
         onOpenAuthModal={() => setAuthModalOpen(true)}
       />
 
-      {/* Invite landing banner — visible when arriving via ?join=GFT-XXXX */}
-      {showJoinBanner && (
+      {/* Invite landing banner — supports both group and personal invite URLs. */}
+      {showInviteBanner && (
         <div className="border-b border-[#1DB954]/30 bg-[#0d2010]">
           <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
             <div className="flex items-center gap-3 text-sm text-white">
               <Ticket className="h-5 w-5 text-[#1DB954] shrink-0" aria-hidden="true" />
               <span>
-                You were invited to group{' '}
-                <strong className="font-mono text-[#1DB954]">{joinCodeFromUrl}</strong>.{' '}
-                {currentUser ? 'Open your profile to claim a seat.' : 'Sign in — your seat is waiting.'}
+                {isGroupInvite ? (
+                  <>
+                    You were invited to group{' '}
+                    <strong className="font-mono text-[#1DB954]">{joinCodeFromUrl}</strong>.{' '}
+                    {currentUser ? 'Open your profile to request a seat.' : 'Sign in to request a seat.'}
+                  </>
+                ) : (
+                  <>You were invited to JOIN THE QUEUE. Create an account or sign in to explore available plans.</>
+                )}
               </span>
             </div>
             <div className="flex items-center gap-2">
@@ -844,11 +860,11 @@ export default function App() {
                 onClick={() => (currentUser ? openProfileView() : setAuthModalOpen(true))}
                 className="inline-flex items-center min-h-[36px] rounded-full bg-[#1DB954] px-4 py-1.5 text-xs font-bold text-black transition-colors hover:bg-[#15803D] hover:text-white cursor-pointer"
               >
-                {currentUser ? 'Open join flow' : 'Sign In'}
+                {currentUser ? (isGroupInvite ? 'Open join flow' : 'Open My Profile') : (isGroupInvite ? 'Sign In' : 'Create Account')}
               </button>
               <button
                 type="button"
-                onClick={() => setJoinBannerDismissed(true)}
+                onClick={() => setInviteBannerDismissed(true)}
                 aria-label="Dismiss invitation banner"
                 title="Dismiss"
                 className="flex h-9 w-9 items-center justify-center rounded-full text-[#B3B3B3] hover:text-white transition-colors cursor-pointer"
@@ -966,6 +982,7 @@ export default function App() {
 
       <AuthModal
         isOpen={authModalOpen}
+        defaultMode={isPersonalInvite && !currentUser ? 'signup' : 'login'}
         onClose={() => setAuthModalOpen(false)}
         onSuccess={() => {
           setAuthModalOpen(false);

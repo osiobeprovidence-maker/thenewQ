@@ -197,7 +197,9 @@ export function ProfileView({
   useEffect(() => {
     refreshMyGroups();
     // Prefill a ?join=GFT-XXXX invite link straight into the join flow
-    const fromUrl = new URLSearchParams(window.location.search).get('join');
+    const pathMatch = window.location.pathname.match(/^\/invite\/([^/]+)\/?$/i);
+    const pathCode = pathMatch ? pathMatch[1] : null;
+    const fromUrl = new URLSearchParams(window.location.search).get('join') ?? pathCode;
     if (fromUrl) {
       setJoinCode(fromUrl.trim().toUpperCase());
       setSubView('join');
@@ -300,7 +302,7 @@ export function ProfileView({
   const giftDurationObj = BILLING_DURATIONS.find((d) => d.months === giftDuration) ?? BILLING_DURATIONS[0];
   const giftTotal = giftPlan ? giftPlan.priceMonthly * giftDuration : 0;
 
-  const inviteUrl = `https://jointhenewq.vercel.app/invite/${profile.inviteCode}`;
+  const inviteUrl = `${window.location.origin}/invite/${encodeURIComponent(profile.inviteCode)}`;
   const paidTotals = paymentHistory
     .filter((item) => item.status === 'Confirmed')
     .reduce((totals, item) => {
