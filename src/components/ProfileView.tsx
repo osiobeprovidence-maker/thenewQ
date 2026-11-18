@@ -1,5 +1,4 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import type { ConfirmationResult, RecaptchaVerifier } from 'firebase/auth';
 import {
   ArrowLeft,
   Calendar,
@@ -83,9 +82,8 @@ interface ProfileViewProps {
     recipientWhatsapp: string;
     note: string;
   }) => string;
-  setupPhoneRecaptcha: (containerId: string) => RecaptchaVerifier;
-  sendPhoneOtp: (phone: string, verifier: RecaptchaVerifier) => Promise<ConfirmationResult>;
-  verifyAndLinkPhone: (verificationId: string, code: string, phone: string) => Promise<void>;
+  phoneVerified: boolean;
+  onSavePhone: (phone: string) => Promise<void>;
 }
 
 type HistoryFilter = 'all' | 'renewal' | 'gift';
@@ -136,9 +134,8 @@ export function ProfileView({
   onSimulateAdminMessage,
   onSendInvite,
   onPayForSomebody,
-  setupPhoneRecaptcha,
-  sendPhoneOtp,
-  verifyAndLinkPhone,
+  phoneVerified,
+  onSavePhone,
 }: ProfileViewProps) {
   const [subView, setSubView] = useState<ProfileSubView>('overview');
   const [mockPassword, setMockPassword] = useState<string | null>(null);
@@ -1001,9 +998,8 @@ export function ProfileView({
       {subView === 'settings' && (
         <SettingsView
           phoneNumber={profile.whatsappNumber}
-          setupPhoneRecaptcha={setupPhoneRecaptcha}
-          sendPhoneOtp={sendPhoneOtp}
-          verifyAndLinkPhone={verifyAndLinkPhone}
+          phoneVerified={phoneVerified}
+          onSavePhone={onSavePhone}
           passwordConfigured={mockPassword !== null}
           onBack={() => openSubPage('overview')}
           onSetPassword={setMockPassword}

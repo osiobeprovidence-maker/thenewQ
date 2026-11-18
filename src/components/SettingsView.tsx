@@ -1,12 +1,10 @@
-import { useRef, useState, type FormEvent } from 'react';
-import type { ConfirmationResult, RecaptchaVerifier } from 'firebase/auth';
+import { useState, type FormEvent } from 'react';
 import { ArrowLeft, CheckCircle2, Eye, EyeOff, KeyRound, Phone, ShieldCheck, UsersRound } from 'lucide-react';
 
 interface SettingsViewProps {
   phoneNumber: string;
-  setupPhoneRecaptcha: (containerId: string) => RecaptchaVerifier;
-  sendPhoneOtp: (phone: string, verifier: RecaptchaVerifier) => Promise<ConfirmationResult>;
-  verifyAndLinkPhone: (verificationId: string, code: string, phone: string) => Promise<void>;
+  phoneVerified: boolean;
+  onSavePhone: (phone: string) => Promise<void>;
   passwordConfigured: boolean;
   onBack: () => void;
   onSetPassword: (password: string) => void;
@@ -20,9 +18,8 @@ const MIN_PASSWORD_LENGTH = 8;
 
 export function SettingsView({
   phoneNumber,
-  setupPhoneRecaptcha,
-  sendPhoneOtp,
-  verifyAndLinkPhone,
+  phoneVerified,
+  onSavePhone,
   passwordConfigured,
   onBack,
   onSetPassword,
@@ -37,16 +34,11 @@ export function SettingsView({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [phoneInput, setPhoneInput] = useState(phoneNumber);
-  const [otpCode, setOtpCode] = useState('');
   const [phoneBusy, setPhoneBusy] = useState(false);
-  const [otpSent, setOtpSent] = useState(false);
-  const confirmationRef = useRef<ConfirmationResult | null>(null);
-  const recaptchaRef = useRef<RecaptchaVerifier | null>(null);
 
-  const handleSendPhoneOtp = async (event: FormEvent<HTMLFormElement>) => {
+  const handleSavePhone = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
-    setSuccess(null);
     const normalized = phoneInput.trim().replace(/[\s()-]/g, '');
     if (!/^\+[1-9]\d{6,14}$/.test(normalized)) {
       setError('Enter a valid phone number with country code, e.g. +2348012345678.');
@@ -54,33 +46,11 @@ export function SettingsView({
     }
     setPhoneBusy(true);
     try {
-      recaptchaRef.current ??= setupPhoneRecaptcha('recaptcha-profile-phone');
-      confirmationRef.current = await sendPhoneOtp(normalized, recaptchaRef.current);
+      await onSavePhone(normalized);
       setPhoneInput(normalized);
-      setOtpSent(true);
-      setSuccess(`A verification code was sent to ${normalized}.`);
+      setSuccess('Phone number saved. You can verify it later in Account Settings.');
     } catch (err) {
-      recaptchaRef.current = null;
-      setError(err instanceof Error ? err.message : 'Could not send a verification code.');
-    } finally {
-      setPhoneBusy(false);
-    }
-  };
-
-  const handleVerifyPhone = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!confirmationRef.current) return;
-    setError(null);
-    setSuccess(null);
-    setPhoneBusy(true);
-    try {
-      await verifyAndLinkPhone(confirmationRef.current.verificationId, otpCode, phoneInput.trim());
-      setOtpSent(false);
-      setOtpCode('');
-      confirmationRef.current = null;
-      setSuccess('Your phone number has been verified and saved.');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not verify this phone number.');
+      setError(err instanceof Error ? err.message : 'Could not save this phone number.');
     } finally {
       setPhoneBusy(false);
     }
@@ -191,7 +161,7 @@ export function SettingsView({
               Account Security
             </h1>
             <p className="mt-1 text-sm leading-relaxed text-[#B3B3B3]">
-              Add or update your verified contact number and manage your password.
+              Add or update your contact number and manage your password.
             </p>
           </div>
         </div>
@@ -221,6 +191,7 @@ export function SettingsView({
               <Phone className="h-4 w-4 shrink-0 text-[#1DB954]" aria-hidden="true" />
               {phoneNumber || 'No phone number added yet'}
             </p>
+            <p className="mt-2 text-xs text-[#B3B3B3]">{phoneNumber ? (phoneVerified ? 'Verified' : 'Not verified yet') : 'Add one below; verification can be completed later.'}</p>
           </div>
           <div className="rounded-xl border border-white/10 bg-[#121212] p-4">
             <p className="text-xs font-medium text-[#B3B3B3]">Password status</p>
@@ -231,26 +202,17 @@ export function SettingsView({
           </div>
         </div>
 
-        <form onSubmit={otpSent ? handleVerifyPhone : handleSendPhoneOtp} className="mt-5 space-y-3 rounded-xl border border-white/10 bg-[#121212] p-4">
+        <form onSubmit={handleSavePhone} className="mt-5 space-y-3 rounded-xl border border-white/10 bg-[#121212] p-4">
           <label htmlFor="profile-phone" className="block text-sm font-semibold text-white">
             {phoneNumber ? 'Update phone number' : 'Add phone number'}
           </label>
-          <p className="text-xs text-[#B3B3B3]">Use international format with country code. We’ll verify it by SMS.</p>
-          <div id="recaptcha-profile-phone" />
-          {otpSent ? (
-            <>
-              <label htmlFor="profile-phone-otp" className="block text-sm font-medium text-white">Verification code</label>
-              <input id="profile-phone-otp" inputMode="numeric" autoComplete="one-time-code" value={otpCode} onChange={(event) => setOtpCode(event.target.value)} required className="min-h-[46px] w-full rounded-xl border border-white/15 bg-[#181818] px-4 py-2.5 text-sm text-white focus:border-[#1DB954] focus:outline-none" placeholder="Enter SMS code" />
-            </>
-          ) : (
-            <input id="profile-phone" type="tel" autoComplete="tel" value={phoneInput} onChange={(event) => setPhoneInput(event.target.value)} required className="min-h-[46px] w-full rounded-xl border border-white/15 bg-[#181818] px-4 py-2.5 text-sm text-white focus:border-[#1DB954] focus:outline-none" placeholder="+2348012345678" />
-          )}
+          <p className="text-xs text-[#B3B3B3]">Use international format with country code, e.g. +2348012345678. You can verify it later.</p>
+          <input id="profile-phone" type="tel" autoComplete="tel" value={phoneInput} onChange={(event) => setPhoneInput(event.target.value)} required className="min-h-[46px] w-full rounded-xl border border-white/15 bg-[#181818] px-4 py-2.5 text-sm text-white focus:border-[#1DB954] focus:outline-none" placeholder="+2348012345678" />
           {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
           <div className="flex flex-wrap gap-3">
             <button type="submit" disabled={phoneBusy} className="min-h-[44px] rounded-full bg-[#1DB954] px-5 py-2.5 text-sm font-bold text-black disabled:opacity-60">
-              {phoneBusy ? 'Please wait…' : otpSent ? 'Verify and save number' : 'Send verification code'}
+              {phoneBusy ? 'Saving…' : 'Save phone number'}
             </button>
-            {otpSent && <button type="button" onClick={() => { setOtpSent(false); setOtpCode(''); confirmationRef.current = null; }} className="min-h-[44px] rounded-full border border-white/20 px-5 py-2.5 text-sm font-semibold text-white">Change number</button>}
           </div>
         </form>
 
@@ -331,7 +293,7 @@ export function SettingsView({
       <section className="rounded-2xl border border-white/10 bg-[#181818] p-5 sm:p-6">
         <h2 className="text-base font-bold text-white">Login preference</h2>
         <p className="mt-2 text-sm leading-relaxed text-[#B3B3B3]">
-          Phone numbers are verified with SMS before they are linked to your account. Password changes are managed through your sign-in provider.
+          Phone numbers can be added before verification. You can complete verification later when phone verification is available. Password changes are managed through your sign-in provider.
         </p>
       </section>
     </div>

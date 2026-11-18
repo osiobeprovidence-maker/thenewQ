@@ -117,6 +117,28 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
     }
   };
 
+  const handleSavePhoneForLater = async () => {
+    setError(null);
+    setSuccessMsg(null);
+    if (!localPhone.trim() || localPhone.trim().length < 7) {
+      setError('Please enter a valid phone number before continuing.');
+      return;
+    }
+    setLoading(true);
+    try {
+      await updateUserProfile({
+        phone: fullPhone,
+        phone_verified: false,
+      });
+      setSuccessMsg('Phone number saved. You can verify it later in Account Settings.');
+      setStep('password');
+    } catch (err: any) {
+      setError(err?.message || 'Could not save your phone number. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -237,6 +259,14 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
                 className="w-full flex items-center justify-center rounded-full bg-[#1DB954] py-3 text-sm font-bold text-black hover:bg-[#17a349] transition-colors disabled:opacity-60"
               >
                 {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Send Verification Code'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSavePhoneForLater()}
+                disabled={loading}
+                className="w-full rounded-full border border-white/20 py-3 text-sm font-semibold text-white hover:border-[#1DB954] transition-colors disabled:opacity-60"
+              >
+                Save number and verify later
               </button>
             </form>
           )}
