@@ -1,5 +1,4 @@
 import { supabase } from './supabase.js';
-import { SUBSCRIPTION_PLANS } from '../data/subscriptions';
 import type { SubscriptionPlan } from '../types/subscription';
 
 export interface DatabaseProduct {
@@ -41,14 +40,15 @@ export async function fetchLiveSubscriptionPlans(): Promise<SubscriptionPlan[]> 
       .select('*')
       .eq('is_active', true);
 
+    // No bundled fallback: the catalog is whatever the admin published.
     if (prodError || !products || products.length === 0) {
-      return SUBSCRIPTION_PLANS;
+      return [];
     }
 
     // Query slots to calculate real availability
     const { data: slots } = await supabase
       .from('slots')
-      .select('*, slot_memberships(id, status)');
+      .select('*, slot_memberships(id, status, approval_status)');
 
     return products.map((prod: any) => {
       const productSlots = slots ? slots.filter((s: any) => s.product_id === prod.id) : [];
@@ -56,15 +56,17 @@ export async function fetchLiveSubscriptionPlans(): Promise<SubscriptionPlan[]> 
       let occupiedCount = 0;
 
       productSlots.forEach((s: any) => {
-        totalCapacity += s.capacity || 6;
+        totalCapacity += s.capacity || 0;
         const activeMembers = Array.isArray(s.slot_memberships)
-          ? s.slot_memberships.filter((m: any) => m.status !== 'cancelled').length
+          ? s.slot_memberships.filter(
+              (m: any) => m.status !== 'cancelled' && (m.approval_status ?? 'approved') === 'approved'
+            ).length
           : 0;
         occupiedCount += activeMembers;
       });
 
-      const openSlots = Math.max(0, (totalCapacity || 6) - occupiedCount);
-      const isAvailable = openSlots > 0;
+      const openSlots = Math.max(0, totalCapacity - occupiedCount);
+      const isAvailable = totalCapacity > 0 && openSlots > 0;
 
       return {
         id: prod.id,
@@ -93,8 +95,8 @@ export async function fetchLiveSubscriptionPlans(): Promise<SubscriptionPlan[]> 
       };
     });
   } catch (err) {
-    console.warn('Error fetching live products from Supabase, using baseline:', err);
-    return SUBSCRIPTION_PLANS;
+    console.warn('Error fetching live products from Supabase:', err);
+    return [];
   }
 }
 

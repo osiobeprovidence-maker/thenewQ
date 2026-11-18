@@ -234,11 +234,9 @@ export function MarketplaceView({ onBackToProfile }: { onBackToProfile: () => vo
             Marketplace Coming Soon
           </h1>
           <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-[#B3B3B3] sm:text-base">
-            Premium plans from verified providers will appear here once the team lists them. No items are available yet — check back shortly.
+            There are no listings in the live marketplace yet. Admin-approved listings will appear here when they are available.
           </p>
-          <p className="mt-6 text-xs text-[#B3B3B3]">
-            We only show listings that have been explicitly added and approved.
-          </p>
+          <p className="mt-6 text-xs text-[#B3B3B3]">This page shows live approved listings only.</p>
         </section>
       </div>
     );

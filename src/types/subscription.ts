@@ -68,6 +68,11 @@ export interface GroupMember {
   contactedBy?: string;
   contactNote?: string;
   collectedBySupport?: boolean;
+  /** Raw membership row status from the database (active/expired/cancelled). */
+  membershipStatus?: 'active' | 'expired' | 'cancelled';
+  approvalStatus?: 'pending' | 'approved' | 'rejected';
+  approvedAt?: string | null;
+  firstPaymentDueDate?: string | null;
 }
 
 export interface PlatformTransaction {
@@ -83,10 +88,12 @@ export interface PlatformTransaction {
     | 'Renewal'
     | 'Paid for Somebody'
     | 'Support Collected'
-    | 'Admin Marked Paid';
+    | 'Admin Marked Paid'
+    | 'verified_checkout'
+    | 'bachs';
   amount: number;
   currencySymbol: string;
-  status: 'Confirmed (Demo)' | 'Waitlist Recorded';
+  status: 'Confirmed (Demo)' | 'Waitlist Recorded' | 'Confirmed' | 'Pending' | 'Failed' | 'Refunded';
 }
 
 export interface SubscriptionGroup {
@@ -191,7 +198,7 @@ export interface PaymentRecord {
   currencySymbol: string;
   kind: 'initial' | 'renewal' | 'gift';
   recipientName?: string;
-  status: 'Confirmed (Demo)' | 'Waitlist Recorded';
+  status: 'Confirmed (Demo)' | 'Waitlist Recorded' | 'Confirmed' | 'Pending' | 'Failed' | 'Refunded';
 }
 
 export interface InvitedPerson {

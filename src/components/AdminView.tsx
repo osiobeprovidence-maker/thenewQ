@@ -98,6 +98,7 @@ interface AdminViewProps {
   ) => void;
   onDispatchGroupToInbox: (groupId: string) => number;
   onSetGroupLeader: (groupId: string, memberId: string) => void;
+  onApproveGroupMember: (memberId: string) => void;
   onToggleMemberPaymentStatus: (groupId: string, memberId: string) => void;
   onCollectMemberPayment: (groupId: string, memberId: string, collectorRole: PortalRole) => void;
   onLogMemberContact: (
@@ -134,6 +135,7 @@ export function AdminView({
   onUpdateGroupDetails,
   onDispatchGroupToInbox,
   onSetGroupLeader,
+  onApproveGroupMember,
   onToggleMemberPaymentStatus,
   onCollectMemberPayment,
   onLogMemberContact,
@@ -497,7 +499,7 @@ export function AdminView({
 
   // Financial Metrics
   const totalPlatformPaid = transactions
-    .filter((t) => t.status === 'Confirmed (Demo)')
+    .filter((t) => t.status === 'Confirmed')
     .reduce((sum, t) => sum + t.amount, 0);
 
   const totalOutstandingUnpaid = unpaidMembers.reduce(
@@ -927,7 +929,7 @@ export function AdminView({
                 {activeTab === 'financials' && (
                   <>
                     <div className="rounded-xl border border-white/10 bg-[#181818] p-3.5">
-                      <p className="text-xs text-[#B3B3B3]">Total Paid (Demo)</p>
+                      <p className="text-xs text-[#B3B3B3]">Confirmed Payments</p>
                       <p className="mt-1 font-mono text-lg sm:text-xl font-bold text-[#1DB954] tabular-nums">
                         {formatAmount(totalPlatformPaid)}
                       </p>
@@ -1277,10 +1279,10 @@ export function AdminView({
                     const isSelected = grp.id === selectedGroup?.id;
                     const leader = grp.members.find((m) => m.isLeader);
                     const unpaidCount = grp.members.filter(
-                      (m) => m.paymentStatus === 'Unpaid'
+                      (m) => m.paymentStatus === 'Unpaid' && (m.approvalStatus ?? 'approved') === 'approved'
                     ).length;
                     const activeCount = grp.members.filter(
-                      (m) => m.paymentStatus !== 'Cancelled'
+                      (m) => m.paymentStatus !== 'Cancelled' && (m.approvalStatus ?? 'approved') === 'approved'
                     ).length;
 
                     return (
@@ -1357,9 +1359,9 @@ export function AdminView({
                               </span>
                               <span className="text-white/25">·</span>
                               <span className="font-mono font-semibold text-white tabular-nums">
-                                {selectedGroup.members.filter((m) => m.paymentStatus !== 'Cancelled').length}/{selectedGroup.maxSlots}
+                                {selectedGroup.members.filter((m) => m.paymentStatus !== 'Cancelled' && (m.approvalStatus ?? 'approved') === 'approved').length}/{selectedGroup.maxSlots} approved seats
                               </span>
-                              {selectedGroup.members.filter((m) => m.paymentStatus !== 'Cancelled').length >= selectedGroup.maxSlots && (
+                              {selectedGroup.members.filter((m) => m.paymentStatus !== 'Cancelled' && (m.approvalStatus ?? 'approved') === 'approved').length >= selectedGroup.maxSlots && (
                                 <span className="rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-amber-400">
                                   FULL
                                 </span>
@@ -1551,7 +1553,7 @@ export function AdminView({
                           <h3 className="text-lg font-bold text-white">
                             {isSupport && supportPermissions.viewScope === 'unpaid-only'
                               ? `Unpaid Members in ${selectedGroup.groupName} (${displayedGroupMembers.length})`
-                              : `Members in ${selectedGroup.groupName} (${displayedGroupMembers.length})`}
+                              : `Join Requests & Members in ${selectedGroup.groupName} (${displayedGroupMembers.length})`}
                           </h3>
                           <p className="text-xs text-[#B3B3B3]">
                             Click a member&apos;s name to view full info, contact them, or collect payment
@@ -1569,6 +1571,11 @@ export function AdminView({
                         </div>
                       </div>
 
+                      {selectedGroup.members.some((m) => (m.approvalStatus ?? 'approved') === 'pending') && (
+                        <p className="-mt-2 text-xs font-semibold text-amber-300">
+                          {selectedGroup.members.filter((m) => (m.approvalStatus ?? 'approved') === 'pending').length} waiting for approval; these requests are not counted as approved seats.
+                        </p>
+                      )}
                       {displayedGroupMembers.length === 0 ? (
                         <div className="py-10 text-center text-sm text-[#B3B3B3]">
                           No members match this view in {selectedGroup.groupName}.
@@ -1585,6 +1592,7 @@ export function AdminView({
                             const canSeeContact = isAdmin || supportPermissions.canViewContactDetails;
                             const canCollect =
                               member.paymentStatus === 'Unpaid' &&
+                              (member.approvalStatus ?? 'approved') === 'approved' &&
                               (isAdmin || supportPermissions.canCollectPayments);
                             const canRemove =
                               isAdmin ||
@@ -1661,6 +1669,22 @@ export function AdminView({
                                         <span>{member.paymentStatus}</span>
                                       </span>
                                       <span className="text-white/25">·</span>
+                                      <span className={member.approvalStatus === 'pending' ? 'font-semibold text-amber-300' : 'text-[#B3B3B3]'}>
+                                        {member.approvalStatus === 'pending'
+                                          ? 'Awaiting approval'
+                                          : member.approvalStatus === 'rejected'
+                                            ? 'Not approved'
+                                            : 'Approved'}
+                                      </span>
+                                      {member.firstPaymentDueDate && member.approvalStatus === 'approved' && (
+                                        <>
+                                          <span className="text-white/25">·</span>
+                                          <span className="text-[#B3B3B3]">
+                                            First payment due {formatDisplayDate(member.firstPaymentDueDate)}
+                                          </span>
+                                        </>
+                                      )}
+                                      <span className="text-white/25">·</span>
                                       <span className="text-[#B3B3B3]">
                                         Payer: {member.payerLabel}
                                       </span>
@@ -1679,6 +1703,19 @@ export function AdminView({
 
                                   {/* Member Row Actions */}
                                   <div className="flex flex-wrap items-center gap-2 shrink-0">
+                                    {isAdmin && member.approvalStatus === 'pending' && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          onApproveGroupMember(member.id);
+                                          showNotice(`${member.fullName} approved. First payment is due the next day.`);
+                                        }}
+                                        className="inline-flex items-center gap-1.5 min-h-[38px] rounded-full bg-[#1DB954] px-3.5 py-1.5 text-xs font-bold text-black hover:bg-[#15803D] hover:text-white transition-colors cursor-pointer"
+                                      >
+                                        <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                                        <span>Approve Join</span>
+                                      </button>
+                                    )}
                                     <button
                                       type="button"
                                       onClick={() => handleOpenMemberModal(selectedGroup.id, member)}
@@ -1698,7 +1735,7 @@ export function AdminView({
                                             portalRole
                                           );
                                           showNotice(
-                                            `Collected payment for ${member.fullName} and updated platform financials.`
+                                            `Marked ${member.fullName} as paid. Verified totals include recorded payment transactions only.`
                                           );
                                         }}
                                         className="inline-flex items-center gap-1.5 min-h-[38px] rounded-full bg-[#1DB954] px-3.5 py-1.5 text-xs font-bold text-black hover:bg-[#15803D] hover:text-white transition-colors cursor-pointer"
@@ -1708,7 +1745,7 @@ export function AdminView({
                                       </button>
                                     )}
 
-                                    {isAdmin && !member.isLeader && member.paymentStatus !== 'Cancelled' && (
+                                    {isAdmin && !member.isLeader && member.paymentStatus !== 'Cancelled' && member.approvalStatus !== 'pending' && (
                                       <button
                                         type="button"
                                         onClick={() => {
@@ -1987,7 +2024,7 @@ export function AdminView({
             {/* Top Financial KPIs */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="rounded-2xl border border-[#1DB954]/40 bg-[#181818] p-5">
-                <p className="text-xs font-medium text-[#B3B3B3]">Total Paid on Platform (Demo)</p>
+                <p className="text-xs font-medium text-[#B3B3B3]">Confirmed Payments on Platform</p>
                 <p className="mt-2 font-mono text-2xl sm:text-3xl font-extrabold text-[#1DB954] tabular-nums">
                   {formatAmount(totalPlatformPaid)}
                 </p>
@@ -2042,10 +2079,10 @@ export function AdminView({
                 {groups.map((grp) => {
                   const grpPlan = plans.find((p) => p.id === grp.planId) ?? plans[0];
                   const grpPaidTotal = transactions
-                    .filter((t) => t.groupCode === grp.groupCode && t.status === 'Confirmed (Demo)')
+                    .filter((t) => t.groupCode === grp.groupCode && t.status === 'Confirmed')
                     .reduce((sum, t) => sum + t.amount, 0);
-                  const grpUnpaidCount = grp.members.filter(
-                    (m) => m.paymentStatus === 'Unpaid'
+              const grpUnpaidCount = grp.members.filter(
+                    (m) => m.paymentStatus === 'Unpaid' && (m.approvalStatus ?? 'approved') === 'approved'
                   ).length;
                   const grpPendingTotal = grpUnpaidCount * grpPlan.priceMonthly;
 
@@ -2549,7 +2586,7 @@ export function AdminView({
             )}
 
             {/* Collect Payment Action (when Unpaid) */}
-            {inspectedMember.paymentStatus === 'Unpaid' &&
+            {inspectedMember.paymentStatus === 'Unpaid' && inspectedMember.approvalStatus !== 'pending' &&
               (isAdmin || supportPermissions.canCollectPayments) && (
                 <button
                   type="button"

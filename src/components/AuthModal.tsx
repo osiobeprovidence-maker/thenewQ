@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { Mail, Lock, Phone, User, CheckCircle2, AlertCircle, Loader2, ArrowLeft, X } from 'lucide-react';
+import { Mail, Lock, Phone, User, CheckCircle2, AlertCircle, Loader2, ArrowLeft, X, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ConfirmationResult, RecaptchaVerifier } from 'firebase/auth';
 
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
-  defaultMode?: 'login' | 'signup' | 'phone' | 'forgot';
+  defaultMode?: 'login' | 'signup' | 'phone' | 'phone-login' | 'forgot';
   onSuccess?: () => void;
 }
 
@@ -14,6 +14,7 @@ export function AuthModal({ isOpen, onClose, defaultMode = 'login', onSuccess }:
   const {
     loginWithGoogle,
     loginWithEmail,
+    loginWithPhoneAndPassword,
     signupWithEmail,
     sendPasswordReset,
     setupPhoneRecaptcha,
@@ -21,13 +22,18 @@ export function AuthModal({ isOpen, onClose, defaultMode = 'login', onSuccess }:
     confirmPhoneOtp,
   } = useAuth();
 
-  const [mode, setMode] = useState<'login' | 'signup' | 'phone' | 'forgot'>(defaultMode);
+  const [mode, setMode] = useState<'login' | 'signup' | 'phone' | 'phone-login' | 'forgot'>(defaultMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [otpCode, setOtpCode] = useState('');
   const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
+
+  // Phone + password login state
+  const [phoneLoginNumber, setPhoneLoginNumber] = useState('');
+  const [phoneLoginPassword, setPhoneLoginPassword] = useState('');
+  const [showPhoneLoginPass, setShowPhoneLoginPass] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -118,6 +124,21 @@ export function AuthModal({ isOpen, onClose, defaultMode = 'login', onSuccess }:
     }
   };
 
+  const handlePhoneLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      await loginWithPhoneAndPassword(phoneLoginNumber.trim(), phoneLoginPassword);
+      onSuccess?.();
+      onClose();
+    } catch (err: any) {
+      setError(err?.message || 'Login failed. Please check your phone number and password.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
       <div className="relative w-full max-w-md rounded-2xl border border-white/10 bg-[#121212] p-6 sm:p-8 shadow-2xl text-white">
@@ -137,6 +158,7 @@ export function AuthModal({ isOpen, onClose, defaultMode = 'login', onSuccess }:
             {mode === 'login' && 'Sign in to JOIN THE QUEUE'}
             {mode === 'signup' && 'Create your account'}
             {mode === 'phone' && 'Phone Authentication'}
+            {mode === 'phone-login' && 'Sign in with Phone'}
             {mode === 'forgot' && 'Reset your password'}
           </h2>
           <p className="mt-1 text-xs text-[#B3B3B3]">
@@ -159,7 +181,7 @@ export function AuthModal({ isOpen, onClose, defaultMode = 'login', onSuccess }:
         )}
 
         {/* Google Authentication */}
-        {mode !== 'forgot' && !confirmationResult && (
+        {mode !== 'forgot' && mode !== 'phone-login' && !confirmationResult && (
           <div className="space-y-3 mb-5">
             <button
               type="button"
@@ -375,6 +397,62 @@ export function AuthModal({ isOpen, onClose, defaultMode = 'login', onSuccess }:
           </div>
         )}
 
+        {/* Phone + Password Login Form */}
+        {mode === 'phone-login' && (
+          <form onSubmit={handlePhoneLogin} className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-[#B3B3B3] mb-1">
+                Phone Number (International format)
+              </label>
+              <div className="relative">
+                <Phone className="absolute left-3 top-3 w-4 h-4 text-[#B3B3B3]" />
+                <input
+                  type="tel"
+                  required
+                  value={phoneLoginNumber}
+                  onChange={(e) => setPhoneLoginNumber(e.target.value)}
+                  placeholder="+234 801 234 5678"
+                  className="w-full pl-9 pr-4 py-2.5 rounded-lg border border-white/10 bg-[#181818] text-sm text-white placeholder-[#B3B3B3] focus:border-[#1DB954] focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-[#B3B3B3] mb-1">Password</label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-3 w-4 h-4 text-[#B3B3B3]" />
+                <input
+                  type={showPhoneLoginPass ? 'text' : 'password'}
+                  required
+                  value={phoneLoginPassword}
+                  onChange={(e) => setPhoneLoginPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full pl-9 pr-10 py-2.5 rounded-lg border border-white/10 bg-[#181818] text-sm text-white placeholder-[#B3B3B3] focus:border-[#1DB954] focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPhoneLoginPass((v) => !v)}
+                  className="absolute right-3 top-3 text-[#B3B3B3] hover:text-white"
+                  aria-label={showPhoneLoginPass ? 'Hide password' : 'Show password'}
+                >
+                  {showPhoneLoginPass
+                    ? <EyeOff className="w-4 h-4" />
+                    : <Eye className="w-4 h-4" />
+                  }
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full flex items-center justify-center rounded-full bg-[#1DB954] py-3 text-sm font-bold text-black hover:bg-[#15803D] hover:text-white transition-colors"
+            >
+              {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Sign In'}
+            </button>
+          </form>
+        )}
+
         {/* Footer Mode Switchers */}
         <div className="mt-6 pt-4 border-t border-white/10 text-center space-y-2">
           {mode === 'login' ? (
@@ -398,11 +476,11 @@ export function AuthModal({ isOpen, onClose, defaultMode = 'login', onSuccess }:
                 onClick={() => {
                   setError(null);
                   setSuccessMessage(null);
-                  setMode('phone');
+                  setMode('phone-login');
                 }}
                 className="text-xs text-[#B3B3B3] hover:text-white underline block mx-auto"
               >
-                Sign in with Phone Number
+                Sign in with Phone Number + Password
               </button>
             </>
           ) : mode === 'signup' ? (

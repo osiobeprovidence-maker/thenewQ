@@ -10,23 +10,23 @@ import { InfoModal } from './components/InfoModal';
 import { Navbar } from './components/Navbar';
 import { OrderModal } from './components/OrderModal';
 import { PlansSection } from './components/PlansSection';
+import { OnboardingFlow } from './components/OnboardingFlow';
 import { ProfileView } from './components/ProfileView';
 import { useAuth } from './context/AuthContext';
-import { fetchLiveSubscriptionPlans } from './lib/subscriptionService';
+import { fetchLiveSubscriptionPlans, fetchUserTransactions } from './lib/subscriptionService';
 import { startBachsCheckout, fetchReservationStatus, cancelMyMembership } from './lib/paymentProvider';
 import {
   BILLING_DURATIONS,
   BRAND_INFO,
   DEFAULT_SUPPORT_PERMISSIONS,
   FAQ_ITEMS,
-  INITIAL_PLATFORM_TRANSACTIONS,
-  SUBSCRIPTION_PLANS,
   addMonthsToIso,
   formatAmount,
   formatPlanPrice,
 } from './data/subscriptions';
 import {
   createSubscriptionGroup,
+  approveGroupMember,
   deleteSubscriptionGroup,
   fetchAdminGroups,
   joinGroupByCode,
@@ -36,6 +36,11 @@ import {
   setMembershipPayment,
   updateSubscriptionGroup,
 } from './lib/groupService';
+import {
+  createSubscriptionProduct,
+  fetchPaymentTransactions,
+  setSubscriptionProductActive,
+} from './lib/platformService';
 import type {
   ActiveSubscription,
   AppView,
@@ -62,7 +67,7 @@ const INITIAL_FORM_DATA: OrderFormData = {
   fullName: '',
   email: '',
   whatsappNumber: '',
-  planId: SUBSCRIPTION_PLANS[0].id,
+  planId: '',
   groupCode: '',
   acceptedTerms: false,
 };
@@ -134,10 +139,12 @@ export default function App() {
   const {
     currentUser,
     profile: authProfile,
+    loading: authLoading,
     isAdmin,
     isSuperAdmin,
     isSupport,
     hasPendingStaffInvite,
+    refreshProfile,
   } = useAuth();
   const [currentView, setCurrentView] = useState<AppView>('landing');
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -165,11 +172,9 @@ export default function App() {
   // Visible staff console only for staff, invited users, or designated bootstrap accounts.
   const canOpenStaffConsole =
     staffAccess !== null || hasPendingStaffInvite || designatedSuperAdminAvailable;
-  const [plans, setPlans] = useState<SubscriptionPlan[]>(SUBSCRIPTION_PLANS);
+  const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [groups, setGroups] = useState<SubscriptionGroup[]>([]);
-  const [platformTransactions, setPlatformTransactions] = useState<PlatformTransaction[]>(
-    INITIAL_PLATFORM_TRANSACTIONS
-  );
+  const [platformTransactions, setPlatformTransactions] = useState<PlatformTransaction[]>([]);
   const [orderModalOpen, setOrderModalOpen] = useState(false);
   const [orderStep, setOrderStep] = useState<OrderModalStep>('form');
   const [formData, setFormData] = useState<OrderFormData>(INITIAL_FORM_DATA);
@@ -197,6 +202,68 @@ export default function App() {
       .catch((err) => console.warn('Could not load groups:', err));
   };
 
+  // Available Plans come only from the database catalog (admin-managed).
+  const refreshPlans = () => {
+    fetchLiveSubscriptionPlans()
+      .then((livePlans) => {
+        setPlans(livePlans);
+        setLivePlanIds(new Set(livePlans.map((p) => p.id)));
+      })
+      .catch((err) => console.warn('Could not load plans:', err));
+  };
+
+  // Real payment ledger — verified payment_transactions rows only.
+  const refreshTransactions = () => {
+    fetchPaymentTransactions()
+      .then((rows) => setPlatformTransactions(rows))
+      .catch((err) => console.warn('Could not load payment transactions:', err));
+  };
+
+  const refreshPaymentHistory = () => {
+    if (!currentUser) {
+      setPaymentHistory([]);
+      return;
+    }
+    fetchUserTransactions(currentUser.uid)
+      .then((rows) => {
+        const records = (rows ?? []).map((r: Record<string, unknown>) => {
+          const metadata = (r.metadata as Record<string, unknown>) ?? {};
+          const rawStatus = (r.status as string) || 'pending';
+          return {
+            id: String(r.id ?? ''),
+            referenceId: (r.provider_reference as string) || String(r.id ?? ''),
+            date: (r.created_at as string) ?? new Date().toISOString(),
+            planName: (metadata.product_name as string) || 'Subscription',
+            durationLabel: '1 month',
+            months: 1 as BillingDurationMonths,
+            amount: Number(r.amount ?? 0),
+            currencySymbol: (r.currency as string) === 'NGN' ? '₦' : '$',
+            kind: 'initial' as const,
+            status:
+              rawStatus === 'success' || rawStatus === 'confirmed'
+                ? ('Confirmed' as const)
+                : rawStatus === 'failed'
+                  ? ('Failed' as const)
+                  : ('Pending' as const),
+          };
+        });
+        setPaymentHistory(records);
+      })
+      .catch((err) => {
+        console.warn('Could not load payment history:', err);
+        setPaymentHistory([]);
+      });
+  };
+
+  useEffect(() => {
+    refreshPlans();
+    refreshTransactions();
+  }, []);
+
+  useEffect(() => {
+    refreshPaymentHistory();
+  }, [currentUser]);
+
   useEffect(() => {
     let mounted = true;
     fetchAdminGroups()
@@ -204,20 +271,6 @@ export default function App() {
         if (mounted) setGroups(liveGroups);
       })
       .catch((err) => console.warn('Could not load groups:', err));
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  // Synchronize live subscription plans from Supabase
-  useEffect(() => {
-    let mounted = true;
-    fetchLiveSubscriptionPlans().then((livePlans) => {
-      if (mounted && livePlans.length > 0) {
-        setPlans(livePlans);
-        setLivePlanIds(new Set(livePlans.map((p) => p.id)));
-      }
-    });
     return () => {
       mounted = false;
     };
@@ -252,11 +305,7 @@ export default function App() {
       chosenPlanForCheckout.id
     );
   const checkoutMode: 'live' | 'demo' =
-    import.meta.env.VITE_DEMO_MODE === 'true'
-      ? 'demo'
-      : currentUser && chosenPlanIsLive && isLivePlanId
-        ? 'live'
-        : 'demo';
+    currentUser && chosenPlanIsLive && isLivePlanId ? 'live' : 'demo';
 
   const navigateToSection = (sectionId: string) => {
     if (currentView !== 'landing') {
@@ -287,8 +336,11 @@ export default function App() {
   };
 
   const handleJoinNowFromNav = () => {
-    const firstAvailablePlan =
-      plans.find((plan) => plan.status === 'available') ?? plans[0];
+    const firstAvailablePlan = plans.find((plan) => plan.status === 'available') ?? plans[0];
+    if (!firstAvailablePlan) {
+      window.alert('No live subscription plans are available right now.');
+      return;
+    }
     openJoinModalForPlan(firstAvailablePlan);
   };
 
@@ -597,6 +649,10 @@ export default function App() {
 
   const handleStartNewOrder = () => {
     const defaultPlan = plans.find((p) => p.status === 'available') ?? plans[0];
+    if (!defaultPlan) {
+      setCheckoutError('No live subscription plans are available right now.');
+      return;
+    }
     setFormData((prev) => ({
       ...prev,
       planId: defaultPlan.id,
@@ -983,6 +1039,15 @@ export default function App() {
       });
   };
 
+  const handleApproveGroupMember = (memberId: string) => {
+    void approveGroupMember(memberId)
+      .then(() => refreshGroups())
+      .catch((err: unknown) => {
+        console.warn('Could not approve group member:', err);
+        window.alert('Could not approve this member. Check permissions or try again.');
+      });
+  };
+
   const handleToggleMemberPaymentStatus = (groupId: string, memberId: string) => {
     const targetGroup = groups.find((g) => g.id === groupId);
     const target = targetGroup?.members.find((m) => m.id === memberId);
@@ -998,37 +1063,18 @@ export default function App() {
   const handleCollectMemberPayment = (
     groupId: string,
     memberId: string,
-    collectorRole: PortalRole
+    _collectorRole: PortalRole
   ) => {
-    const targetGroup = groups.find((g) => g.id === groupId);
-    const targetMember = targetGroup?.members.find((m) => m.id === memberId);
-    if (!targetGroup || !targetMember || targetMember.paymentStatus === 'Paid') return;
-
-    const groupPlan = plans.find((p) => p.id === targetGroup.planId) ?? plans[0];
-    const nowIso = new Date().toISOString();
-
+    const target = groups.find((g) => g.id === groupId)?.members.find((m) => m.id === memberId);
+    if (!target || target.paymentStatus === 'Paid' || target.approvalStatus === 'pending') return;
+    // This is a staff-recorded/manual payment status override, not a payment transaction.
+    // Verified financial transactions are loaded separately from payment_transactions.
     void setMembershipPayment(memberId, true)
       .then(() => refreshGroups())
       .catch((err: unknown) => {
-        console.warn('Could not collect payment:', err);
-        window.alert('Could not mark this member as paid. Check permissions or try again.');
+        console.warn('Could not record the manual payment status:', err);
+        window.alert('Could not update the payment status. Check permissions or try again.');
       });
-
-    setPlatformTransactions((prev) => [
-      {
-        id: `tx-${Date.now()}`,
-        referenceId: targetMember.referenceId,
-        date: nowIso,
-        memberName: targetMember.fullName,
-        planName: groupPlan.name,
-        groupCode: targetGroup.groupCode,
-        source: collectorRole === 'support' ? 'Support Collected' : 'Admin Marked Paid',
-        amount: groupPlan.priceMonthly,
-        currencySymbol: groupPlan.currencySymbol,
-        status: 'Confirmed (Demo)',
-      },
-      ...prev,
-    ]);
   };
 
   const handleLogMemberContact = (
@@ -1121,54 +1167,29 @@ export default function App() {
     totalSlots: number;
     status: PlanStatus;
   }) => {
-    const slotsOpen = status === 'available' ? totalSlots : 0;
-    const newPlan: SubscriptionPlan = {
-      id: `plan-${Date.now()}`,
-      name,
-      category,
-      description,
-      priceMonthly,
-      currencySymbol: '₦',
-      billingCycle: 'month',
-      status,
-      availabilityLabel:
-        status === 'available'
-          ? `Available now · ${slotsOpen} ${slotsOpen === 1 ? 'slot' : 'slots'} remaining`
-          : 'Next batch opening soon · Waitlist open',
-      slotsOpen,
-      totalSlots,
-      eligibilityNote:
-        'Independent slot coordination listed by Admin. Verify eligibility before joining.',
-      highlights: [
-        'Admin-coordinated subscription slot access',
-        'Receive group invite link and home address in your Profile Inbox',
-        'Manage monthly or multi-month renewals anytime',
-      ],
-      icon: 'music-disc',
-      featured: false,
-    };
-    setPlans((prev) => [...prev, newPlan]);
+    void createSubscriptionProduct({ name, category, description, monthlyPrice: priceMonthly })
+      .then(() => refreshPlans())
+      .catch((err: unknown) => {
+        console.warn('Could not create subscription plan:', err);
+        window.alert('Could not save the plan. Check permissions and try again.');
+      });
   };
 
   const handleTogglePlanStatus = (planId: string) => {
-    setPlans((prev) =>
-      prev.map((plan) => {
-        if (plan.id !== planId) return plan;
-        const nextStatus: PlanStatus = plan.status === 'available' ? 'waitlist' : 'available';
-        const nextOpen =
-          nextStatus === 'available' ? Math.max(1, plan.slotsOpen || plan.totalSlots) : 0;
-        return {
-          ...plan,
-          status: nextStatus,
-          slotsOpen: nextOpen,
-          availabilityLabel:
-            nextStatus === 'available'
-              ? `Available now · ${nextOpen} ${nextOpen === 1 ? 'slot' : 'slots'} remaining`
-              : 'Next batch opening soon · Waitlist open',
-        };
-      })
-    );
+    const plan = plans.find((item) => item.id === planId);
+    if (!plan) return;
+    void setSubscriptionProductActive(planId, plan.status !== 'available')
+      .then(() => refreshPlans())
+      .catch((err: unknown) => {
+        console.warn('Could not update subscription plan:', err);
+        window.alert('Could not update the plan. Check permissions and try again.');
+      });
   };
+
+  // Onboarding intercept: new Google users must complete phone + password setup before seeing the app
+  if (!authLoading && currentUser && authProfile && authProfile.onboarding_completed === false) {
+    return <OnboardingFlow onComplete={refreshProfile} />;
+  }
 
   return (
     <div className="min-h-screen bg-black text-white flex flex-col">
@@ -1273,6 +1294,7 @@ export default function App() {
             onUpdateGroupDetails={handleUpdateGroupDetails}
             onDispatchGroupToInbox={handleDispatchGroupToInbox}
             onSetGroupLeader={handleSetGroupLeader}
+            onApproveGroupMember={handleApproveGroupMember}
             onToggleMemberPaymentStatus={handleToggleMemberPaymentStatus}
             onCollectMemberPayment={handleCollectMemberPayment}
             onLogMemberContact={handleLogMemberContact}

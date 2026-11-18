@@ -50,6 +50,7 @@ export interface JoinedGroup {
   group_code: string;
   product_name: string;
   payment_status: GroupMemberPaymentStatus;
+  approval_status: 'pending' | 'approved' | 'rejected';
   home_address: string | null;
 }
 
@@ -133,7 +134,9 @@ export async function fetchAdminGroups(): Promise<SubscriptionGroup[]> {
       created_at: string;
     };
     const membershipsForSlot = membershipsBySlot.get(s.id) ?? [];
-    const members: GroupMember[] = membershipsForSlot.map((m) => {
+    const members: GroupMember[] = membershipsForSlot
+      .filter((m) => m.status !== 'cancelled' && m.approval_status !== 'rejected')
+      .map((m) => {
       const userId = (m.beneficiary_user_id ?? m.payer_user_id) as string;
       const profile = profileByUser.get(userId);
       const rawStatus = (m.payment_status as string) || 'Unpaid';
@@ -154,6 +157,16 @@ export async function fetchAdminGroups(): Promise<SubscriptionGroup[]> {
         joinedAt: (m.joined_at as string) ?? new Date().toISOString(),
         payerLabel: (m.payer_user_id as string) === (m.beneficiary_user_id as string) ? 'Self' : 'Sponsor',
         amountPaid: Number(m.amount_paid ?? 0),
+        membershipStatus:
+          (m.status as string) === 'expired'
+            ? 'expired'
+            : (m.status as string) === 'cancelled'
+              ? 'cancelled'
+              : 'active',
+        approvalStatus:
+          (m.approval_status as 'pending' | 'approved' | 'rejected' | undefined) ?? 'approved',
+        approvedAt: (m.approved_at as string | null | undefined) ?? null,
+        firstPaymentDueDate: (m.first_payment_due_date as string | null | undefined) ?? null,
       };
     });
 
@@ -212,6 +225,8 @@ export interface MyGroupEntry {
   homeAddress: string | null;
   inviteLink: string | null;
   isLeader: boolean;
+  approvalStatus: 'pending' | 'approved' | 'rejected';
+  firstPaymentDueDate: string | null;
 }
 
 /** The signed-in user's own groups — read via RLS (own memberships + public goods). */
@@ -222,19 +237,20 @@ export async function fetchMyGroups(): Promise<MyGroupEntry[]> {
 
   const { data: memberships, error } = await sb
     .from('slot_memberships')
-    .select('id, slot_id, status, payment_status, is_leader')
+    .select('id, slot_id, status, payment_status, is_leader, approval_status, first_payment_due_date')
     .or(`payer_user_id.eq.${uid},beneficiary_user_id.eq.${uid}`);
   if (error) throw new Error(error.message);
 
   const rows = (memberships ?? []).filter(
-    (m: Record<string, unknown>) => (m.status as string) !== 'cancelled'
+    (m: Record<string, unknown>) =>
+      (m.status as string) !== 'cancelled' && m.approval_status !== 'rejected'
   );
   if (rows.length === 0) return [];
 
   const slotIds = [...new Set(rows.map((r) => r.slot_id as string))];
   const { data: slots, error: slotsError } = await sb
     .from('slots')
-    .select('id, group_name, group_code, home_address, invite_link, product_id')
+      .select('id, group_name, group_code, home_address, invite_link, product_id')
     .in('id', slotIds);
   if (slotsError) throw new Error(slotsError.message);
 
@@ -266,6 +282,9 @@ export async function fetchMyGroups(): Promise<MyGroupEntry[]> {
       homeAddress: (s.home_address as string) ?? null,
       inviteLink: (s.invite_link as string) ?? null,
       isLeader: Boolean(m.is_leader),
+      approvalStatus:
+        (m.approval_status as 'pending' | 'approved' | 'rejected' | undefined) ?? 'approved',
+      firstPaymentDueDate: (m.first_payment_due_date as string | null | undefined) ?? null,
     };
   });
 }
@@ -347,6 +366,15 @@ export async function setMembershipPayment(
   const { error } = await sb.rpc('set_membership_payment', {
     p_membership_id: membershipId,
     p_paid: paid,
+  });
+  if (error) throw new Error(error.message);
+}
+
+export async function approveGroupMember(membershipId: string): Promise<void> {
+  const sb = requireSupabase();
+  await requireFirebaseToken();
+  const { error } = await sb.rpc('approve_group_member', {
+    p_membership_id: membershipId,
   });
   if (error) throw new Error(error.message);
 }

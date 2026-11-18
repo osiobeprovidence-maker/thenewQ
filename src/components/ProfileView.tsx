@@ -189,10 +189,7 @@ export function ProfileView({
     try {
       const result = await joinGroupByCode(joinPreview.groupCode);
       setJoinSuccess(
-        `You joined ${result.group_name} (${result.group_code}) for ${result.product_name}. ` +
-          (result.payment_status === 'Unpaid'
-            ? 'Your seat is reserved — arrange payment with your group admin.'
-            : 'The seat is yours!')
+        `Your request to join ${result.group_name} (${result.group_code}) for ${result.product_name} was sent. Your seat is reserved while the admin reviews it.`
       );
       setJoinPreview(null);
       setJoinCode('');
@@ -903,7 +900,7 @@ export function ProfileView({
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-base font-bold text-white">Your Groups</h2>
-                <p className="text-xs text-[#B3B3B3]">Live from your account — the same records your admins see.</p>
+                <p className="text-xs text-[#B3B3B3]">Live membership records linked to your account.</p>
               </div>
               <button
                 type="button"
@@ -929,6 +926,18 @@ export function ProfileView({
                         <p className="font-mono text-xs font-extrabold text-[#1DB954] tabular-nums">Code {g.groupCode}</p>
                         <p className="mt-1 text-sm font-bold text-white">{g.groupName}</p>
                         <p className="text-xs text-[#B3B3B3]">{g.planName}{g.isLeader ? ' · Group Leader' : ''}</p>
+                        <p className={`mt-1 text-xs font-semibold ${g.approvalStatus === 'pending' ? 'text-amber-300' : 'text-[#1DB954]'}`}>
+                          {g.approvalStatus === 'pending'
+                            ? 'Waiting for admin approval'
+                            : g.approvalStatus === 'rejected'
+                              ? 'Join request was not approved'
+                              : 'Approved'}
+                        </p>
+                        {g.firstPaymentDueDate && g.approvalStatus === 'approved' && (
+                          <p className="mt-1 text-xs text-[#B3B3B3]">
+                            First payment due {formatDisplayDate(g.firstPaymentDueDate)}
+                          </p>
+                        )}
                         {g.homeAddress && (
                           <p className="mt-1.5 flex items-start gap-1.5 text-[11px] text-[#B3B3B3] break-words">
                             <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#1DB954]" aria-hidden="true" />
@@ -944,7 +953,9 @@ export function ProfileView({
                               : 'bg-amber-400/10 text-amber-400'
                           }`}
                         >
-                          {g.paymentStatus}
+                          {g.approvalStatus === 'pending'
+                            ? 'PAYMENT NOT DUE'
+                            : g.paymentStatus}
                         </span>
                         {g.inviteLink && (
                           <button

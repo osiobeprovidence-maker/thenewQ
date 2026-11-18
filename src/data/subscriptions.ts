@@ -1,8 +1,6 @@
-import type {
+﻿import type {
   BillingDurationOption,
   FaqItem,
-  GoogleStaffAccount,
-  PlatformTransaction,
   SubscriptionPlan,
   SupportPermissions,
 } from '../types/subscription';
@@ -12,31 +10,10 @@ export const BRAND_INFO = {
   slogan: 'Get in. Get Premium. Enjoy.',
   supportWhatsappDisplay: '+234 800 000 0000',
   supportEmailDisplay: 'support@jointhequeue.demo',
-  operatingHours: 'Monday – Saturday, 9:00 AM – 7:00 PM WAT',
+  operatingHours: 'Monday â€“ Saturday, 9:00 AM â€“ 7:00 PM WAT',
   demoAdminSender: 'JOIN THE QUEUE Admin',
   demoHomeAddress: '14 Admiralty Way, Lekki Phase 1, Lagos (Demo Address)',
 };
-
-export const INITIAL_GOOGLE_STAFF_ACCOUNTS: GoogleStaffAccount[] = [
-  {
-    id: 'staff-admin-1',
-    name: 'Main Admin',
-    email: 'admin@jointhequeue.demo',
-    role: 'admin',
-  },
-  {
-    id: 'staff-admin-2',
-    name: 'Operations Admin',
-    email: 'admin@jointhequeue.demo',
-    role: 'admin',
-  },
-  {
-    id: 'staff-support-1',
-    name: 'Customer Care Desk',
-    email: 'support@jointhequeue.demo',
-    role: 'support',
-  },
-];
 
 export const DEFAULT_SUPPORT_PERMISSIONS: SupportPermissions = {
   viewScope: 'unpaid-only',
@@ -74,113 +51,6 @@ export const BILLING_DURATIONS: BillingDurationOption[] = [
   },
 ];
 
-export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
-  {
-    id: 'spotify-premium',
-    name: 'Spotify Premium',
-    category: 'Music Streaming',
-    description: 'Enjoy your music experience with Premium.',
-    priceMonthly: 800,
-    currencySymbol: '₦',
-    billingCycle: 'month',
-    status: 'available',
-    availabilityLabel: 'Available now · 4 slots remaining',
-    slotsOpen: 4,
-    totalSlots: 6,
-    eligibilityNote:
-      'Independent slot coordination for eligible accounts. JOIN THE QUEUE is not affiliated with or endorsed by Spotify.',
-    highlights: [
-      'Ad-free listening experience across mobile and desktop',
-      'Offline downloads for playlists and podcasts',
-      'Simple monthly slot coordination with clear confirmation steps',
-    ],
-    icon: 'spotify-wave',
-    featured: true,
-  },
-  {
-    id: 'youtube-premium',
-    name: 'YouTube Premium',
-    category: 'Video & Music',
-    description: 'Watch videos uninterrupted and stream background audio across devices.',
-    priceMonthly: 1100,
-    currencySymbol: '₦',
-    billingCycle: 'month',
-    status: 'waitlist',
-    availabilityLabel: 'Next batch opening soon · Waitlist open',
-    slotsOpen: 0,
-    totalSlots: 5,
-    eligibilityNote:
-      'Waitlist registration only. You will be notified when eligible slots open for the next cycle.',
-    highlights: [
-      'Ad-free video streaming and background playback',
-      'Includes access to YouTube Music streaming',
-      'Priority queue notification once the next batch opens',
-    ],
-    icon: 'play-stream',
-    featured: false,
-  },
-  {
-    id: 'apple-music',
-    name: 'Apple Music',
-    category: 'Lossless Audio',
-    description: 'Stream curated radio, spatial audio, and millions of tracks seamlessly.',
-    priceMonthly: 1000,
-    currencySymbol: '₦',
-    billingCycle: 'month',
-    status: 'waitlist',
-    availabilityLabel: 'Next batch opening soon · Waitlist open',
-    slotsOpen: 0,
-    totalSlots: 6,
-    eligibilityNote:
-      'Waitlist registration only. Slots open subject to regional account eligibility.',
-    highlights: [
-      'Lossless and spatial audio catalog support',
-      'Curated playlists and live radio stations',
-      'Early notification before general queue access opens',
-    ],
-    icon: 'music-disc',
-    featured: false,
-  },
-];
-
-export const INITIAL_PLATFORM_TRANSACTIONS: PlatformTransaction[] = [
-  {
-    id: 'tx-seed-tunde',
-    referenceId: 'GFT-1001',
-    date: '2026-11-01T10:05:00.000Z',
-    memberName: 'Tunde Bello',
-    planName: 'Spotify Premium',
-    groupCode: 'GFT-7471',
-    source: 'Initial Seed',
-    amount: 800,
-    currencySymbol: '₦',
-    status: 'Confirmed (Demo)',
-  },
-  {
-    id: 'tx-seed-kemi',
-    referenceId: 'JTQ-2104',
-    date: '2026-11-05T11:30:00.000Z',
-    memberName: 'Kemi Adeyemi',
-    planName: 'Spotify Premium',
-    groupCode: 'GFT-7471',
-    source: 'User Checkout',
-    amount: 800,
-    currencySymbol: '₦',
-    status: 'Confirmed (Demo)',
-  },
-  {
-    id: 'tx-seed-chidi',
-    referenceId: 'JTQ-2290',
-    date: '2026-11-08T16:15:00.000Z',
-    memberName: 'Chidi Nwosu',
-    planName: 'Spotify Premium',
-    groupCode: 'GFT-7471',
-    source: 'Paid for Somebody',
-    amount: 2400,
-    currencySymbol: '₦',
-    status: 'Confirmed (Demo)',
-  },
-];
 
 export const FAQ_ITEMS: FaqItem[] = [
   {
@@ -219,7 +89,7 @@ export function formatPlanPrice(plan: SubscriptionPlan): string {
   return `${plan.currencySymbol}${plan.priceMonthly.toLocaleString('en-NG')}/${plan.billingCycle}`;
 }
 
-export function formatAmount(amount: number, currencySymbol = '₦'): string {
+export function formatAmount(amount: number, currencySymbol = 'â‚¦'): string {
   return `${currencySymbol}${amount.toLocaleString('en-NG')}`;
 }
 

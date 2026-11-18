@@ -11,6 +11,10 @@ import {
   RecaptchaVerifier,
   signInWithPhoneNumber,
   ConfirmationResult,
+  PhoneAuthProvider,
+  EmailAuthProvider,
+  linkWithCredential,
+  updatePassword,
 } from 'firebase/auth';
 import { auth } from '../lib/firebase.js';
 import { checkMyPendingStaffInvitation, fetchStaffAccess } from '../lib/staffAccess';
@@ -25,6 +29,8 @@ export interface UserProfileData {
   avatar_url?: string;
   created_at?: string;
   status?: string;
+  onboarding_completed?: boolean;
+  phone_verified?: boolean;
 }
 
 interface AuthContextType {
@@ -37,11 +43,15 @@ interface AuthContextType {
   hasPendingStaffInvite: boolean;
   loginWithGoogle: () => Promise<void>;
   loginWithEmail: (email: string, pass: string) => Promise<void>;
+  loginWithPhoneAndPassword: (phone: string, pass: string) => Promise<void>;
   signupWithEmail: (email: string, pass: string, fullName: string) => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
   setupPhoneRecaptcha: (containerId: string) => RecaptchaVerifier;
   sendPhoneOtp: (phone: string, recaptchaVerifier: RecaptchaVerifier) => Promise<ConfirmationResult>;
   confirmPhoneOtp: (confirmationResult: ConfirmationResult, code: string) => Promise<void>;
+  verifyAndLinkPhone: (verificationId: string, code: string, verifiedPhone: string) => Promise<void>;
+  setupAccountPassword: (password: string) => Promise<void>;
+  completeOnboarding: (phone: string) => Promise<void>;
   updateUserProfile: (updates: Partial<UserProfileData>) => Promise<void>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -77,8 +87,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (data) {
-        setProfile(data as UserProfileData);
+        // If user already has a phone, or is grandfathered, onboarding_completed is true
+        const isCompleted = data.onboarding_completed ?? Boolean(data.phone && data.phone.trim().length > 5);
+        setProfile({
+          ...(data as UserProfileData),
+          onboarding_completed: isCompleted,
+          phone_verified: data.phone_verified ?? Boolean(data.phone),
+        });
       } else {
+        const isGoogleUser = user.providerData.some((p) => p.providerId === 'google.com');
         const newProfile: UserProfileData = {
           user_id: user.uid,
           username,
@@ -87,6 +104,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           phone: user.phoneNumber || undefined,
           avatar_url: user.photoURL || undefined,
           status: 'active',
+          onboarding_completed: !isGoogleUser || Boolean(user.phoneNumber),
+          phone_verified: Boolean(user.phoneNumber),
         };
 
         const { data: inserted, error: insertError } = await supabase
@@ -173,6 +192,84 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return signInWithPhoneNumber(auth, phone.trim(), recaptchaVerifier);
   };
 
+  const loginWithPhoneAndPassword = async (phone: string, pass: string) => {
+    // 1. Look up user by phone in Supabase profiles
+    const cleanPhone = phone.trim();
+    const { data: userRecord, error } = await supabase
+      .from('profiles')
+      .select('email, user_id')
+      .eq('phone', cleanPhone)
+      .maybeSingle();
+
+    if (error || !userRecord || !userRecord.email) {
+      throw new Error('No account found associated with this phone number. Please sign in with Google or your email.');
+    }
+
+    // 2. Sign in with the linked email and password
+    const result = await signInWithEmailAndPassword(auth, userRecord.email, pass);
+    await syncProfileToSupabase(result.user);
+  };
+
+  const verifyAndLinkPhone = async (verificationId: string, code: string, verifiedPhone: string) => {
+    if (!currentUser) throw new Error('No user is currently signed in.');
+    
+    // Check if phone is already used by another account
+    const { data: existingPhone } = await supabase
+      .from('profiles')
+      .select('user_id')
+      .eq('phone', verifiedPhone.trim())
+      .maybeSingle();
+
+    if (existingPhone && existingPhone.user_id !== currentUser.uid) {
+      throw new Error('This phone number is already linked to another account. Please use a different phone number.');
+    }
+
+    const phoneCredential = PhoneAuthProvider.credential(verificationId, code.trim());
+    try {
+      await linkWithCredential(currentUser, phoneCredential);
+    } catch (linkError: any) {
+      // If phone is already linked to this exact account, proceed
+      if (linkError.code !== 'auth/provider-already-linked') {
+        throw linkError;
+      }
+    }
+
+    await updateUserProfile({
+      phone: verifiedPhone.trim(),
+      phone_verified: true,
+    });
+  };
+
+  const setupAccountPassword = async (newPass: string) => {
+    if (!currentUser) throw new Error('No user is currently signed in.');
+    
+    // If user has email, link an EmailAuth credential so they can log in via password directly
+    if (currentUser.email) {
+      const emailCred = EmailAuthProvider.credential(currentUser.email, newPass);
+      try {
+        await linkWithCredential(currentUser, emailCred);
+      } catch (err: any) {
+        if (err.code === 'auth/provider-already-linked') {
+          await updatePassword(currentUser, newPass);
+        } else {
+          // Fallback to updatePassword
+          await updatePassword(currentUser, newPass);
+        }
+      }
+    } else {
+      await updatePassword(currentUser, newPass);
+    }
+  };
+
+  const completeOnboarding = async (verifiedPhone: string) => {
+    if (!currentUser) throw new Error('No user is currently signed in.');
+    await updateUserProfile({
+      phone: verifiedPhone.trim(),
+      phone_verified: true,
+      onboarding_completed: true,
+    });
+  };
+
   const confirmPhoneOtp = async (confirmationResult: ConfirmationResult, code: string) => {
     const result = await confirmationResult.confirm(code.trim());
     await syncProfileToSupabase(result.user);
@@ -240,11 +337,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         hasPendingStaffInvite,
         loginWithGoogle,
         loginWithEmail,
+        loginWithPhoneAndPassword,
         signupWithEmail,
         sendPasswordReset,
         setupPhoneRecaptcha,
         sendPhoneOtp,
         confirmPhoneOtp,
+        verifyAndLinkPhone,
+        setupAccountPassword,
+        completeOnboarding,
         updateUserProfile,
         logout,
         refreshProfile,
