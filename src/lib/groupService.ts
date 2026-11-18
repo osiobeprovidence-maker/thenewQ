@@ -277,6 +277,7 @@ export async function createSubscriptionGroup(args: {
   groupName: string;
   maxSlots: number;
   homeAddress: string;
+  inviteLink?: string;
 }): Promise<{ id: string; groupCode: string; inviteLink: string }> {
   const sb = requireSupabase();
   await requireFirebaseToken();
@@ -286,6 +287,7 @@ export async function createSubscriptionGroup(args: {
     p_capacity: args.maxSlots,
     p_home_address: args.homeAddress.trim(),
     p_invite_base_url: window.location.origin,
+    p_invite_link: args.inviteLink?.trim() || null,
   });
   if (error) throw new Error(error.message);
   const row = data as Record<string, unknown>;
@@ -298,7 +300,7 @@ export async function createSubscriptionGroup(args: {
 
 export async function updateSubscriptionGroup(
   groupId: string,
-  args: { groupName?: string; capacity?: number; homeAddress?: string }
+  args: { groupName?: string; capacity?: number; homeAddress?: string; inviteLink?: string }
 ): Promise<void> {
   const sb = requireSupabase();
   await requireFirebaseToken();
@@ -307,6 +309,7 @@ export async function updateSubscriptionGroup(
     p_group_name: args.groupName ?? null,
     p_capacity: args.capacity ?? null,
     p_home_address: args.homeAddress ?? null,
+    p_invite_link: args.inviteLink !== undefined ? (args.inviteLink.trim() || null) : null,
   });
   if (error) throw new Error(error.message);
 }

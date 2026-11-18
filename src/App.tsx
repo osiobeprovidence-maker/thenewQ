@@ -911,13 +911,21 @@ export default function App() {
     planId,
     homeAddress,
     maxSlots,
+    inviteLink,
   }: {
     groupName: string;
     planId: string;
     homeAddress: string;
     maxSlots: number;
+    inviteLink?: string;
   }): Promise<string> => {
-    const created = await createSubscriptionGroup({ planId, groupName, maxSlots, homeAddress });
+    const created = await createSubscriptionGroup({
+      planId,
+      groupName,
+      maxSlots,
+      homeAddress,
+      inviteLink,
+    });
     refreshGroups();
     return created.id;
   };
@@ -929,17 +937,19 @@ export default function App() {
 
   const handleUpdateGroupDetails = (
     groupId: string,
-    payload: { groupName: string; homeAddress: string; capacity?: number }
+    payload: { groupName: string; homeAddress: string; capacity?: number; inviteLink?: string }
   ) => {
     const trimmed = {
       groupName: payload.groupName,
       homeAddress: payload.homeAddress,
       capacity: payload.capacity,
+      inviteLink: payload.inviteLink,
     };
     void updateSubscriptionGroup(groupId, {
       groupName: trimmed.groupName,
       homeAddress: trimmed.homeAddress,
       capacity: trimmed.capacity,
+      inviteLink: trimmed.inviteLink,
     })
       .then(() => refreshGroups())
       .catch((err) => console.warn('Could not update group:', err));
