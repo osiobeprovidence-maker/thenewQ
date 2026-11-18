@@ -179,3 +179,29 @@ export async function setSubscriptionProductActive(
   });
   if (error) throw new Error(error.message);
 }
+
+export async function setSubscriptionProductAvailability(
+  productId: string,
+  availability: 'open' | 'waitlist'
+): Promise<void> {
+  const sb = requireSupabase();
+  await requireFirebaseToken();
+  const { error } = await sb.rpc('set_subscription_product_availability', {
+    p_product_id: productId,
+    p_availability: availability,
+  });
+  if (error) throw new Error(error.message);
+}
+
+export async function moveSubscriptionProduct(
+  productId: string,
+  direction: 'up' | 'down'
+): Promise<void> {
+  const sb = requireSupabase();
+  await requireFirebaseToken();
+  const { error } = await sb.rpc('move_subscription_product', {
+    p_product_id: productId,
+    p_direction: direction,
+  });
+  if (error) throw new Error(error.message);
+}

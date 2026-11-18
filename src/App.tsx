@@ -41,7 +41,8 @@ import {
 import {
   createSubscriptionProduct,
   fetchPaymentTransactions,
-  setSubscriptionProductActive,
+  moveSubscriptionProduct,
+  setSubscriptionProductAvailability,
 } from './lib/platformService';
 import type {
   ActiveSubscription,
@@ -162,13 +163,14 @@ export default function App() {
   };
 
   // Available Plans come only from the database catalog (admin-managed).
-  const refreshPlans = () => {
-    fetchLiveSubscriptionPlans()
-      .then((livePlans) => {
-        setPlans(livePlans);
-        setLivePlanIds(new Set(livePlans.map((p) => p.id)));
-      })
-      .catch((err) => console.warn('Could not load plans:', err));
+  const refreshPlans = async () => {
+    try {
+      const livePlans = await fetchLiveSubscriptionPlans();
+      setPlans(livePlans);
+      setLivePlanIds(new Set(livePlans.map((p) => p.id)));
+    } catch (err) {
+      console.warn('Could not load plans:', err);
+    }
   };
 
   // Real payment ledger — verified payment_transactions rows only.
@@ -820,15 +822,28 @@ export default function App() {
     }
   };
 
-  const handleTogglePlanStatus = (planId: string) => {
+  const handleTogglePlanStatus = async (planId: string): Promise<void> => {
     const plan = plans.find((item) => item.id === planId);
     if (!plan) return;
-    void setSubscriptionProductActive(planId, plan.status !== 'available')
-      .then(() => refreshPlans())
-      .catch((err: unknown) => {
-        console.warn('Could not update subscription plan:', err);
-        window.alert('Could not update the plan. Check permissions and try again.');
-      });
+    try {
+      await setSubscriptionProductAvailability(planId, plan.status === 'available' ? 'waitlist' : 'open');
+      await refreshPlans();
+    } catch (err: unknown) {
+      console.warn('Could not update subscription plan:', err);
+      window.alert(err instanceof Error ? err.message : 'Could not update the plan. Check permissions and try again.');
+      throw err;
+    }
+  };
+
+  const handleMovePlan = async (planId: string, direction: 'up' | 'down'): Promise<void> => {
+    try {
+      await moveSubscriptionProduct(planId, direction);
+      await refreshPlans();
+    } catch (err: unknown) {
+      console.warn('Could not reorder subscription plan:', err);
+      window.alert(err instanceof Error ? err.message : 'Could not move the plan. Check permissions and try again.');
+      throw err;
+    }
   };
 
   // Onboarding intercept: new Google users must complete phone + password setup before seeing the app
@@ -960,6 +975,7 @@ export default function App() {
             onRemoveGroupMember={handleRemoveGroupMember}
             onAddPlan={handleAddPlan}
             onTogglePlanStatus={handleTogglePlanStatus}
+            onMovePlan={handleMovePlan}
           />
         )}
       </main>

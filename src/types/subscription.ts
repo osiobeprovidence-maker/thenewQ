@@ -29,6 +29,8 @@ export interface SubscriptionPlan {
   highlights: string[];
   icon: PlanIconKey;
   featured?: boolean;
+  displayOrder?: number;
+  availabilityMode?: 'auto' | 'open' | 'waitlist';
 }
 
 export type PortalRole = 'admin' | 'support';

@@ -35,10 +35,20 @@ export interface DatabaseSlot {
  */
 export async function fetchLiveSubscriptionPlans(): Promise<SubscriptionPlan[]> {
   try {
-    const { data: products, error: prodError } = await supabase
+    let productResult = await supabase
       .from('subscription_products')
       .select('*')
-      .eq('is_active', true);
+        .eq('is_active', true)
+        .order('display_order', { ascending: true });
+
+    // Keep the storefront readable while the admin control migration is pending.
+    if (productResult.error && /display_order|schema cache|column/i.test(productResult.error.message)) {
+      productResult = await supabase
+        .from('subscription_products')
+        .select('*')
+        .eq('is_active', true);
+    }
+    const { data: products, error: prodError } = productResult;
 
     // No bundled fallback: the catalog is whatever the admin published.
     if (prodError || !products || products.length === 0) {
@@ -66,7 +76,9 @@ export async function fetchLiveSubscriptionPlans(): Promise<SubscriptionPlan[]> 
       });
 
       const openSlots = Math.max(0, totalCapacity - occupiedCount);
-      const isAvailable = totalCapacity > 0 && openSlots > 0;
+      const availabilityMode = prod.availability_mode ?? 'auto';
+      const isAvailable = availabilityMode === 'open' ||
+        (availabilityMode === 'auto' && totalCapacity > 0 && openSlots > 0);
 
       return {
         id: prod.id,
@@ -77,9 +89,11 @@ export async function fetchLiveSubscriptionPlans(): Promise<SubscriptionPlan[]> 
         currencySymbol: prod.currency === 'NGN' ? '₦' : '$',
         billingCycle: 'month',
         status: isAvailable ? 'available' : 'waitlist',
-        availabilityLabel: isAvailable
-          ? `Available now · ${openSlots} ${openSlots === 1 ? 'slot' : 'slots'} remaining`
-          : 'Current batch full · Waitlist open',
+        availabilityLabel: availabilityMode === 'waitlist'
+          ? 'Waitlist open'
+          : isAvailable
+            ? `Available now · ${openSlots} ${openSlots === 1 ? 'slot' : 'slots'} remaining`
+            : 'Current batch full · Waitlist open',
         slotsOpen: openSlots,
         totalSlots: totalCapacity || 6,
         eligibilityNote:
@@ -92,6 +106,8 @@ export async function fetchLiveSubscriptionPlans(): Promise<SubscriptionPlan[]> 
         ],
         icon: (prod.icon as any) || 'music-disc',
         featured: false,
+        displayOrder: Number(prod.display_order ?? 0),
+        availabilityMode,
       };
     });
   } catch (err) {

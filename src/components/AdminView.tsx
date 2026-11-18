@@ -5,6 +5,8 @@ import {
   Check,
   CheckCircle2,
   ChevronRight,
+  ChevronUp,
+  ChevronDown,
   Copy,
   Crown,
   ExternalLink,
@@ -116,7 +118,8 @@ interface AdminViewProps {
     totalSlots: number;
     status: PlanStatus;
   }) => Promise<void>;
-  onTogglePlanStatus: (planId: string) => void;
+  onTogglePlanStatus: (planId: string) => Promise<void>;
+  onMovePlan: (planId: string, direction: 'up' | 'down') => Promise<void>;
 }
 
 type AdminTab = 'groups' | 'subscriptions' | 'financials' | 'settings';
@@ -142,6 +145,7 @@ export function AdminView({
   onRemoveGroupMember,
   onAddPlan,
   onTogglePlanStatus,
+  onMovePlan,
 }: AdminViewProps) {
   // Login state (claims come from backend-issued Firebase custom claims)
   const {
@@ -1845,7 +1849,7 @@ export function AdminView({
               </div>
 
               <div className="space-y-3">
-                {plans.map((plan) => (
+                {plans.map((plan, index) => (
                   <div
                     key={plan.id}
                     className="rounded-2xl border border-white/10 bg-[#181818] p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
@@ -1862,19 +1866,22 @@ export function AdminView({
                       <p className="text-xs sm:text-sm text-[#B3B3B3]">{plan.description}</p>
                     </div>
 
-                    <div className="flex sm:flex-col items-center sm:items-end justify-between gap-3 shrink-0">
+                    <div className="flex flex-wrap sm:flex-col items-center sm:items-end justify-between gap-3 shrink-0">
                       <span className="font-mono text-lg font-extrabold text-[#1DB954] tabular-nums">
                         {formatPlanPrice(plan)}
                       </span>
+                      <div className="flex items-center gap-2">
+                        <button type="button" aria-label={`Move ${plan.name} up`} title="Move up" disabled={index === 0} onClick={() => { void onMovePlan(plan.id, 'up').catch(() => undefined); }} className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-[#121212] text-white hover:border-[#1DB954] hover:text-[#1DB954] disabled:cursor-not-allowed disabled:opacity-35"><ChevronUp className="h-4 w-4" aria-hidden="true" /></button>
+                        <button type="button" aria-label={`Move ${plan.name} down`} title="Move down" disabled={index === plans.length - 1} onClick={() => { void onMovePlan(plan.id, 'down').catch(() => undefined); }} className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-[#121212] text-white hover:border-[#1DB954] hover:text-[#1DB954] disabled:cursor-not-allowed disabled:opacity-35"><ChevronDown className="h-4 w-4" aria-hidden="true" /></button>
                       <button
                         type="button"
-                        onClick={() => {
-                          onTogglePlanStatus(plan.id);
-                          showNotice(
-                            `Updated ${plan.name} status to ${
-                              plan.status === 'available' ? 'Waitlist' : 'Available'
-                            }.`
-                          );
+                        onClick={async () => {
+                          try {
+                            await onTogglePlanStatus(plan.id);
+                            showNotice(`Updated ${plan.name} status to ${plan.status === 'available' ? 'Waitlist' : 'Open'}.`);
+                          } catch {
+                            // The app reports the database error to the administrator.
+                          }
                         }}
                         className={`min-h-[38px] rounded-full px-4 py-1.5 text-xs font-bold transition-colors cursor-pointer ${
                           plan.status === 'available'
@@ -1884,8 +1891,9 @@ export function AdminView({
                       >
                         {plan.status === 'available'
                           ? 'Open · Switch to Waitlist'
-                          : 'Waitlist · Open Slots'}
+                          : 'Waitlist · Open Plan'}
                       </button>
+                      </div>
                     </div>
                   </div>
                 ))}
