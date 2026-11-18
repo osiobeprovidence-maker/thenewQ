@@ -205,3 +205,12 @@ export async function moveSubscriptionProduct(
   });
   if (error) throw new Error(error.message);
 }
+
+export async function deleteSubscriptionProductListing(productId: string): Promise<void> {
+  const sb = requireSupabase();
+  await requireFirebaseToken();
+  const { error } = await sb.rpc('delete_subscription_product_listing', {
+    p_product_id: productId,
+  });
+  if (error) throw new Error(error.message);
+}

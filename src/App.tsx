@@ -40,6 +40,7 @@ import {
 } from './lib/groupService';
 import {
   createSubscriptionProduct,
+  deleteSubscriptionProductListing,
   fetchPaymentTransactions,
   moveSubscriptionProduct,
   setSubscriptionProductAvailability,
@@ -846,6 +847,17 @@ export default function App() {
     }
   };
 
+  const handleDeletePlan = async (planId: string): Promise<void> => {
+    try {
+      await deleteSubscriptionProductListing(planId);
+      await refreshPlans();
+    } catch (err: unknown) {
+      console.warn('Could not remove subscription listing:', err);
+      window.alert(err instanceof Error ? err.message : 'Could not remove this listing. Check permissions and try again.');
+      throw err;
+    }
+  };
+
   // Onboarding intercept: new Google users must complete phone + password setup before seeing the app
   if (!authLoading && currentUser && authProfile && authProfile.onboarding_completed === false) {
     return <OnboardingFlow onComplete={refreshProfile} />;
@@ -976,6 +988,7 @@ export default function App() {
             onAddPlan={handleAddPlan}
             onTogglePlanStatus={handleTogglePlanStatus}
             onMovePlan={handleMovePlan}
+            onDeletePlan={handleDeletePlan}
           />
         )}
       </main>

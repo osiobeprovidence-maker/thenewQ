@@ -120,6 +120,7 @@ interface AdminViewProps {
   }) => Promise<void>;
   onTogglePlanStatus: (planId: string) => Promise<void>;
   onMovePlan: (planId: string, direction: 'up' | 'down') => Promise<void>;
+  onDeletePlan: (planId: string) => Promise<void>;
 }
 
 type AdminTab = 'groups' | 'subscriptions' | 'financials' | 'settings';
@@ -146,6 +147,7 @@ export function AdminView({
   onAddPlan,
   onTogglePlanStatus,
   onMovePlan,
+  onDeletePlan,
 }: AdminViewProps) {
   // Login state (claims come from backend-issued Firebase custom claims)
   const {
@@ -1892,6 +1894,26 @@ export function AdminView({
                         {plan.status === 'available'
                           ? 'Open · Switch to Waitlist'
                           : 'Waitlist · Open Plan'}
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Delete ${plan.name} listing`}
+                        title="Delete listing"
+                        onClick={async () => {
+                          const confirmed = window.confirm(
+                            `Remove ${plan.name} from the user marketplace? Existing groups and payment history will be kept.`
+                          );
+                          if (!confirmed) return;
+                          try {
+                            await onDeletePlan(plan.id);
+                            showNotice(`${plan.name} was removed from the marketplace.`);
+                          } catch {
+                            // The app reports the database error to the administrator.
+                          }
+                        }}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-red-400/40 bg-[#121212] text-red-300 hover:border-red-400 hover:bg-red-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+                      >
+                        <Trash2 className="h-4 w-4" aria-hidden="true" />
                       </button>
                       </div>
                     </div>
