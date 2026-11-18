@@ -13,7 +13,6 @@ import {
   XCircle,
 } from 'lucide-react';
 import {
-  EMPTY_SUPPORT_SOCIALS,
   PLATFORM_LABELS,
   displayPhone,
   getSupportSocials,
