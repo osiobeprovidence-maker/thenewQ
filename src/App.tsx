@@ -146,6 +146,9 @@ export default function App() {
     hasPendingStaffInvite,
     refreshProfile,
     updateUserProfile,
+    setupPhoneRecaptcha,
+    sendPhoneOtp,
+    verifyAndLinkPhone,
   } = useAuth();
   const [currentView, setCurrentView] = useState<AppView>('landing');
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -1282,6 +1285,9 @@ export default function App() {
             onSavePhone={async (phone) => {
               await updateUserProfile({ phone, phone_verified: false });
             }}
+            setupPhoneRecaptcha={setupPhoneRecaptcha}
+            sendPhoneOtp={sendPhoneOtp}
+            verifyAndLinkPhone={verifyAndLinkPhone}
           />
         )}
 

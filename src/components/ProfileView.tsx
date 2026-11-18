@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import type { ConfirmationResult, RecaptchaVerifier } from 'firebase/auth';
 import {
   ArrowLeft,
   Calendar,
@@ -84,6 +85,9 @@ interface ProfileViewProps {
   }) => string;
   phoneVerified: boolean;
   onSavePhone: (phone: string) => Promise<void>;
+  setupPhoneRecaptcha: (containerId: string) => RecaptchaVerifier;
+  sendPhoneOtp: (phone: string, verifier: RecaptchaVerifier) => Promise<ConfirmationResult>;
+  verifyAndLinkPhone: (verificationId: string, code: string, phone: string) => Promise<void>;
 }
 
 type HistoryFilter = 'all' | 'renewal' | 'gift';
@@ -136,6 +140,9 @@ export function ProfileView({
   onPayForSomebody,
   phoneVerified,
   onSavePhone,
+  setupPhoneRecaptcha,
+  sendPhoneOtp,
+  verifyAndLinkPhone,
 }: ProfileViewProps) {
   const [subView, setSubView] = useState<ProfileSubView>('overview');
   const [mockPassword, setMockPassword] = useState<string | null>(null);
@@ -1000,6 +1007,9 @@ export function ProfileView({
           phoneNumber={profile.whatsappNumber}
           phoneVerified={phoneVerified}
           onSavePhone={onSavePhone}
+          setupPhoneRecaptcha={setupPhoneRecaptcha}
+          sendPhoneOtp={sendPhoneOtp}
+          verifyAndLinkPhone={verifyAndLinkPhone}
           passwordConfigured={mockPassword !== null}
           onBack={() => openSubPage('overview')}
           onSetPassword={setMockPassword}

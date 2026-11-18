@@ -1,10 +1,14 @@
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
+import type { ConfirmationResult, RecaptchaVerifier } from 'firebase/auth';
 import { ArrowLeft, CheckCircle2, Eye, EyeOff, KeyRound, Phone, ShieldCheck, UsersRound } from 'lucide-react';
 
 interface SettingsViewProps {
   phoneNumber: string;
   phoneVerified: boolean;
   onSavePhone: (phone: string) => Promise<void>;
+  setupPhoneRecaptcha: (containerId: string) => RecaptchaVerifier;
+  sendPhoneOtp: (phone: string, verifier: RecaptchaVerifier) => Promise<ConfirmationResult>;
+  verifyAndLinkPhone: (verificationId: string, code: string, phone: string) => Promise<void>;
   passwordConfigured: boolean;
   onBack: () => void;
   onSetPassword: (password: string) => void;
@@ -20,6 +24,9 @@ export function SettingsView({
   phoneNumber,
   phoneVerified,
   onSavePhone,
+  setupPhoneRecaptcha,
+  sendPhoneOtp,
+  verifyAndLinkPhone,
   passwordConfigured,
   onBack,
   onSetPassword,
@@ -35,10 +42,15 @@ export function SettingsView({
   const [success, setSuccess] = useState<string | null>(null);
   const [phoneInput, setPhoneInput] = useState(phoneNumber);
   const [phoneBusy, setPhoneBusy] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const confirmationRef = useRef<ConfirmationResult | null>(null);
+  const recaptchaRef = useRef<RecaptchaVerifier | null>(null);
 
   const handleSavePhone = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
+    setSuccess(null);
     const normalized = phoneInput.trim().replace(/[\s()-]/g, '');
     if (!/^\+[1-9]\d{6,14}$/.test(normalized)) {
       setError('Enter a valid phone number with country code, e.g. +2348012345678.');
@@ -51,6 +63,48 @@ export function SettingsView({
       setSuccess('Phone number saved. You can verify it later in Account Settings.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save this phone number.');
+    } finally {
+      setPhoneBusy(false);
+    }
+  };
+
+  const handleSendPhoneOtp = async () => {
+    setError(null);
+    setSuccess(null);
+    const normalized = phoneInput.trim().replace(/[\s()-]/g, '');
+    if (!/^\+[1-9]\d{6,14}$/.test(normalized)) {
+      setError('Enter a valid phone number with country code before verifying.');
+      return;
+    }
+    setPhoneBusy(true);
+    try {
+      await onSavePhone(normalized);
+      recaptchaRef.current ??= setupPhoneRecaptcha('recaptcha-profile-phone');
+      confirmationRef.current = await sendPhoneOtp(normalized, recaptchaRef.current);
+      setPhoneInput(normalized);
+      setOtpSent(true);
+      setSuccess(`Verification code sent to ${normalized}.`);
+    } catch (err) {
+      recaptchaRef.current = null;
+      setError(err instanceof Error ? err.message : 'Could not send a verification code.');
+    } finally {
+      setPhoneBusy(false);
+    }
+  };
+
+  const handleVerifyPhone = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!confirmationRef.current) return;
+    setError(null);
+    setPhoneBusy(true);
+    try {
+      await verifyAndLinkPhone(confirmationRef.current.verificationId, otpCode, phoneInput.trim());
+      setOtpSent(false);
+      setOtpCode('');
+      confirmationRef.current = null;
+      setSuccess('Phone number verified and saved.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not verify this phone number.');
     } finally {
       setPhoneBusy(false);
     }
@@ -202,18 +256,29 @@ export function SettingsView({
           </div>
         </div>
 
-        <form onSubmit={handleSavePhone} className="mt-5 space-y-3 rounded-xl border border-white/10 bg-[#121212] p-4">
+        <form onSubmit={otpSent ? handleVerifyPhone : handleSavePhone} className="mt-5 space-y-3 rounded-xl border border-white/10 bg-[#121212] p-4">
           <label htmlFor="profile-phone" className="block text-sm font-semibold text-white">
             {phoneNumber ? 'Update phone number' : 'Add phone number'}
           </label>
-          <p className="text-xs text-[#B3B3B3]">Use international format with country code, e.g. +2348012345678. You can verify it later.</p>
+          <p className="text-xs text-[#B3B3B3]">Use international format with country code, e.g. +2348012345678. Save it now or verify it by SMS.</p>
           <input id="profile-phone" type="tel" autoComplete="tel" value={phoneInput} onChange={(event) => setPhoneInput(event.target.value)} required className="min-h-[46px] w-full rounded-xl border border-white/15 bg-[#181818] px-4 py-2.5 text-sm text-white focus:border-[#1DB954] focus:outline-none" placeholder="+2348012345678" />
+          <div id="recaptcha-profile-phone" />
           {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
-          <div className="flex flex-wrap gap-3">
-            <button type="submit" disabled={phoneBusy} className="min-h-[44px] rounded-full bg-[#1DB954] px-5 py-2.5 text-sm font-bold text-black disabled:opacity-60">
-              {phoneBusy ? 'Saving…' : 'Save phone number'}
-            </button>
-          </div>
+          {otpSent ? (
+            <div className="space-y-3">
+              <label htmlFor="profile-phone-otp" className="block text-sm font-semibold text-white">SMS verification code</label>
+              <input id="profile-phone-otp" inputMode="numeric" autoComplete="one-time-code" value={otpCode} onChange={(event) => setOtpCode(event.target.value.replace(/\D/g, '').slice(0, 6))} required className="min-h-[46px] w-full rounded-xl border border-white/15 bg-[#181818] px-4 py-2.5 text-sm text-white focus:border-[#1DB954] focus:outline-none" placeholder="Enter code" />
+              <div className="flex flex-wrap gap-3">
+                <button type="submit" disabled={phoneBusy || otpCode.length < 6} className="min-h-[44px] rounded-full bg-[#1DB954] px-5 py-2.5 text-sm font-bold text-black disabled:opacity-60">{phoneBusy ? 'Verifying…' : 'Verify number'}</button>
+                <button type="button" onClick={() => { setOtpSent(false); setOtpCode(''); confirmationRef.current = null; }} className="min-h-[44px] rounded-full border border-white/20 px-5 py-2.5 text-sm font-semibold text-white">Use another number</button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-3">
+              <button type="submit" disabled={phoneBusy} className="min-h-[44px] rounded-full bg-[#1DB954] px-5 py-2.5 text-sm font-bold text-black disabled:opacity-60">{phoneBusy ? 'Saving…' : 'Save number for later'}</button>
+              {!phoneVerified && <button type="button" onClick={() => void handleSendPhoneOtp()} disabled={phoneBusy} className="min-h-[44px] rounded-full border border-[#1DB954]/60 px-5 py-2.5 text-sm font-semibold text-white hover:border-[#1DB954] disabled:opacity-60">{phoneBusy ? 'Please wait…' : 'Verify now by SMS'}</button>}
+            </div>
+          )}
         </form>
 
         {success && (
