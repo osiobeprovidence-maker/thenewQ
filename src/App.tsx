@@ -323,9 +323,14 @@ export default function App() {
     };
     loadGroups();
     const timer = currentView === 'admin' ? window.setInterval(loadGroups, 10_000) : undefined;
+    refreshTransactions();
+    const transactionsTimer = currentView === 'admin'
+      ? window.setInterval(refreshTransactions, 30_000)
+      : undefined;
     return () => {
       mounted = false;
       if (timer !== undefined) window.clearInterval(timer);
+      if (transactionsTimer !== undefined) window.clearInterval(transactionsTimer);
     };
   }, [currentUser?.uid, currentView]);
 
@@ -698,8 +703,11 @@ export default function App() {
     const targetGroup = groups.find((g) => g.id === groupId);
     const target = targetGroup?.members.find((m) => m.id === memberId);
     if (!target || target.paymentStatus === 'Cancelled') return;
-    void setMembershipPayment(memberId, target.paymentStatus !== 'Paid')
-      .then(() => refreshGroups())
+    void setMembershipPayment(memberId, target.paymentStatus !== 'Paid', 'admin_marked_paid')
+      .then(() => {
+        refreshGroups();
+        refreshTransactions();
+      })
       .catch((err: unknown) => {
         console.warn('Could not toggle payment status:', err);
         window.alert('Could not update the payment status. Check permissions or try again.');
@@ -709,14 +717,16 @@ export default function App() {
   const handleCollectMemberPayment = (
     groupId: string,
     memberId: string,
-    _collectorRole: PortalRole
+    collectorRole: PortalRole
   ) => {
     const target = groups.find((g) => g.id === groupId)?.members.find((m) => m.id === memberId);
     if (!target || target.paymentStatus === 'Paid' || target.approvalStatus === 'pending') return;
-    // This is a staff-recorded/manual payment status override, not a payment transaction.
-    // Verified financial transactions are loaded separately from payment_transactions.
-    void setMembershipPayment(memberId, true)
-      .then(() => refreshGroups())
+    void setMembershipPayment(
+      memberId,
+      true,
+      collectorRole === 'support' ? 'support_collected' : 'admin_marked_paid'
+    )
+      .then(() => Promise.all([refreshGroups(), Promise.resolve(refreshTransactions())]))
       .catch((err: unknown) => {
         console.warn('Could not record the manual payment status:', err);
         window.alert('Could not update the payment status. Check permissions or try again.');

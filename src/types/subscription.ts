@@ -92,10 +92,11 @@ export interface PlatformTransaction {
     | 'Support Collected'
     | 'Admin Marked Paid'
     | 'verified_checkout'
-    | 'bachs';
+    | 'bachs'
+    | 'Pending Checkout';
   amount: number;
   currencySymbol: string;
-  status: 'Waitlist Recorded' | 'Confirmed' | 'Pending' | 'Failed' | 'Refunded';
+  status: 'Waitlist Recorded' | 'Confirmed' | 'Pending' | 'Failed' | 'Refunded' | 'Voided';
 }
 
 export interface SubscriptionGroup {
@@ -104,6 +105,8 @@ export interface SubscriptionGroup {
   groupCode: string;
   planId: string;
   planName: string;
+  planMonthlyPrice?: number;
+  planCurrencySymbol?: string;
   homeAddress: string;
   inviteLink: string;
   maxSlots: number;

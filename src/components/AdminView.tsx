@@ -508,19 +508,33 @@ export function AdminView({
       : 100;
 
   const supportCollectedTransactions = transactions.filter(
-    (t) => t.source === 'Support Collected'
+    (t) => t.source === 'Support Collected' && t.status === 'Confirmed'
   );
-  const supportCollectedAmount = supportCollectedTransactions.reduce((sum, t) => sum + t.amount, 0);
 
   // Financial Metrics
-  const totalPlatformPaid = transactions
-    .filter((t) => t.status === 'Confirmed')
-    .reduce((sum, t) => sum + t.amount, 0);
+  const pendingCheckoutTransactions = transactions.filter((t) => t.status === 'Pending');
+  const failedTransactions = transactions.filter((t) => t.status === 'Failed');
+  const refundedTransactions = transactions.filter((t) => t.status === 'Refunded');
 
-  const totalOutstandingUnpaid = unpaidMembers.reduce(
-    (sum, item) => sum + item.plan.priceMonthly,
-    0
-  );
+  const formatTransactionTotal = (rows: PlatformTransaction[]) => {
+    const amounts = new Map<string, number>();
+    for (const row of rows) {
+      amounts.set(row.currencySymbol, (amounts.get(row.currencySymbol) ?? 0) + row.amount);
+    }
+    return amounts.size > 0
+      ? [...amounts].map(([currency, amount]) => formatAmount(amount, currency)).join(' · ')
+      : formatAmount(0);
+  };
+
+  const outstandingDuesByCurrency = new Map<string, number>();
+  for (const item of unpaidMembers) {
+    const currency = item.group.planCurrencySymbol ?? item.plan?.currencySymbol ?? '₦';
+    const monthlyPrice = item.group.planMonthlyPrice ?? item.plan?.priceMonthly ?? 0;
+    outstandingDuesByCurrency.set(currency, (outstandingDuesByCurrency.get(currency) ?? 0) + monthlyPrice);
+  }
+  const formatOutstandingDues = () => outstandingDuesByCurrency.size > 0
+    ? [...outstandingDuesByCurrency].map(([currency, amount]) => formatAmount(amount, currency)).join(' · ')
+    : formatAmount(0);
 
   // Subscription Catalog Metrics
   const openPlansCount = plans.filter((p) => p.status === 'available').length;
@@ -534,7 +548,10 @@ export function AdminView({
       return (
         t.source === 'User Checkout' ||
         t.source === 'Renewal' ||
-        t.source === 'Paid for Somebody'
+        t.source === 'Paid for Somebody' ||
+        t.source === 'bachs' ||
+        t.source === 'verified_checkout' ||
+        t.source === 'Pending Checkout'
       );
     }
     return true;
@@ -952,19 +969,37 @@ export function AdminView({
                     <div className="rounded-xl border border-white/10 bg-[#181818] p-3.5">
                       <p className="text-xs text-[#B3B3B3]">Confirmed Payments</p>
                       <p className="mt-1 font-mono text-lg sm:text-xl font-bold text-[#1DB954] tabular-nums">
-                        {formatAmount(totalPlatformPaid)}
+                        {formatTransactionTotal(transactions.filter((t) => t.status === 'Confirmed'))}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-[#181818] p-3.5">
+                      <p className="text-xs text-[#B3B3B3]">Pending Checkouts</p>
+                      <p className="mt-1 font-mono text-lg sm:text-xl font-bold text-amber-400 tabular-nums">
+                        {formatTransactionTotal(pendingCheckoutTransactions)}
                       </p>
                     </div>
                     <div className="rounded-xl border border-white/10 bg-[#181818] p-3.5">
                       <p className="text-xs text-[#B3B3B3]">Pending Unpaid</p>
                       <p className="mt-1 font-mono text-lg sm:text-xl font-bold text-amber-400 tabular-nums">
-                        {formatAmount(totalOutstandingUnpaid)}
+                        {formatOutstandingDues()}
                       </p>
                     </div>
                     <div className="rounded-xl border border-white/10 bg-[#181818] p-3.5">
                       <p className="text-xs text-[#B3B3B3]">Support Collected</p>
                       <p className="mt-1 font-mono text-lg sm:text-xl font-bold text-white tabular-nums">
-                        {formatAmount(supportCollectedAmount)}
+                        {formatTransactionTotal(supportCollectedTransactions)}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-[#181818] p-3.5">
+                      <p className="text-xs text-[#B3B3B3]">Failed / Expired</p>
+                      <p className="mt-1 font-mono text-lg sm:text-xl font-bold text-red-400 tabular-nums">
+                        {formatTransactionTotal(failedTransactions)}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-[#181818] p-3.5">
+                      <p className="text-xs text-[#B3B3B3]">Refunded</p>
+                      <p className="mt-1 font-mono text-lg sm:text-xl font-bold text-white tabular-nums">
+                        {formatTransactionTotal(refundedTransactions)}
                       </p>
                     </div>
                     <div className="rounded-xl border border-white/10 bg-[#181818] p-3.5">
@@ -1058,7 +1093,7 @@ export function AdminView({
                 <div className="rounded-xl border border-white/10 bg-[#181818] p-3.5 col-span-2 sm:col-span-1">
                   <p className="text-xs text-[#B3B3B3]">Collected (Support)</p>
                   <p className="mt-1 font-mono text-lg sm:text-xl font-bold text-[#1DB954] tabular-nums">
-                    {supportCollectedTransactions.length} ({formatAmount(supportCollectedAmount)})
+                    {supportCollectedTransactions.length} ({formatTransactionTotal(supportCollectedTransactions)})
                   </p>
                 </div>
               </div>
@@ -2068,11 +2103,11 @@ export function AdminView({
         {isAdmin && activeTab === 'financials' && (
           <div className="space-y-6">
             {/* Top Financial KPIs */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <div className="rounded-2xl border border-[#1DB954]/40 bg-[#181818] p-5">
                 <p className="text-xs font-medium text-[#B3B3B3]">Confirmed Payments on Platform</p>
                 <p className="mt-2 font-mono text-2xl sm:text-3xl font-extrabold text-[#1DB954] tabular-nums">
-                  {formatAmount(totalPlatformPaid)}
+                  {formatTransactionTotal(transactions.filter((t) => t.status === 'Confirmed'))}
                 </p>
                 <p className="mt-1 text-xs text-[#B3B3B3]">
                   Across {transactions.length} recorded transactions
@@ -2082,7 +2117,7 @@ export function AdminView({
               <div className="rounded-2xl border border-white/10 bg-[#181818] p-5">
                 <p className="text-xs font-medium text-[#B3B3B3]">Pending Unpaid Dues</p>
                 <p className="mt-2 font-mono text-2xl sm:text-3xl font-extrabold text-amber-400 tabular-nums">
-                  {formatAmount(totalOutstandingUnpaid)}
+                  {formatOutstandingDues()}
                 </p>
                 <p className="mt-1 text-xs text-[#B3B3B3]">
                   {unpaidMembersCount} {unpaidMembersCount === 1 ? 'member' : 'members'} awaiting payment
@@ -2090,13 +2125,39 @@ export function AdminView({
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-[#181818] p-5">
+                <p className="text-xs font-medium text-[#B3B3B3]">Pending Checkouts</p>
+                <p className="mt-2 font-mono text-2xl sm:text-3xl font-extrabold text-amber-400 tabular-nums">
+                  {formatTransactionTotal(pendingCheckoutTransactions)}
+                </p>
+                <p className="mt-1 text-xs text-[#B3B3B3]">
+                  {pendingCheckoutTransactions.length} awaiting provider confirmation
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-[#181818] p-5">
                 <p className="text-xs font-medium text-[#B3B3B3]">Collected by Customer Care</p>
                 <p className="mt-2 font-mono text-2xl sm:text-3xl font-extrabold text-white tabular-nums">
-                  {formatAmount(supportCollectedAmount)}
+                  {formatTransactionTotal(supportCollectedTransactions)}
                 </p>
                 <p className="mt-1 text-xs text-[#B3B3B3]">
                   {supportCollectedTransactions.length} payments collected by support
                 </p>
+              </div>
+
+              <div className="rounded-2xl border border-red-400/20 bg-[#181818] p-5">
+                <p className="text-xs font-medium text-[#B3B3B3]">Failed / Expired Checkouts</p>
+                <p className="mt-2 font-mono text-2xl sm:text-3xl font-extrabold text-red-400 tabular-nums">
+                  {formatTransactionTotal(failedTransactions)}
+                </p>
+                <p className="mt-1 text-xs text-[#B3B3B3]">{failedTransactions.length} unsuccessful attempts</p>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-[#181818] p-5">
+                <p className="text-xs font-medium text-[#B3B3B3]">Refunded</p>
+                <p className="mt-2 font-mono text-2xl sm:text-3xl font-extrabold text-white tabular-nums">
+                  {formatTransactionTotal(refundedTransactions)}
+                </p>
+                <p className="mt-1 text-xs text-[#B3B3B3]">{refundedTransactions.length} recorded refunds</p>
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-[#181818] p-5">
@@ -2124,13 +2185,12 @@ export function AdminView({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {groups.map((grp) => {
                   const grpPlan = plans.find((p) => p.id === grp.planId) ?? plans[0];
-                  const grpPaidTotal = transactions
-                    .filter((t) => t.groupCode === grp.groupCode && t.status === 'Confirmed')
-                    .reduce((sum, t) => sum + t.amount, 0);
-              const grpUnpaidCount = grp.members.filter(
+                  const grpPaidTransactions = transactions
+                    .filter((t) => t.groupCode === grp.groupCode && t.status === 'Confirmed');
+                  const grpUnpaidCount = grp.members.filter(
                     (m) => m.paymentStatus === 'Unpaid' && (m.approvalStatus ?? 'approved') === 'approved'
                   ).length;
-                  const grpPendingTotal = grpUnpaidCount * grpPlan.priceMonthly;
+                  const grpPendingTotal = grpUnpaidCount * (grp.planMonthlyPrice ?? grpPlan?.priceMonthly ?? 0);
 
                   return (
                     <div
@@ -2145,7 +2205,7 @@ export function AdminView({
                           <h3 className="mt-0.5 text-base font-bold text-white">{grp.groupName}</h3>
                         </div>
                         <span className="font-mono text-base font-extrabold text-[#1DB954] tabular-nums">
-                          {formatAmount(grpPaidTotal)}
+                          {formatTransactionTotal(grpPaidTransactions)}
                         </span>
                       </div>
 
@@ -2155,7 +2215,7 @@ export function AdminView({
                           {grpUnpaidCount} unpaid
                         </span>
                         <span className="font-mono text-amber-400 tabular-nums">
-                          Pending: {formatAmount(grpPendingTotal)}
+                          Pending: {formatAmount(grpPendingTotal, grp.planCurrencySymbol ?? grpPlan?.currencySymbol ?? '₦')}
                         </span>
                       </div>
                     </div>
@@ -2218,6 +2278,7 @@ export function AdminView({
                           <th className="py-3 px-4">Date</th>
                           <th className="py-3 px-4">Member / Payer</th>
                           <th className="py-3 px-4">Plan &amp; Group</th>
+                          <th className="py-3 px-4">Status</th>
                           <th className="py-3 px-4">Source</th>
                           <th className="py-3 pl-4 text-right">Amount</th>
                         </tr>
@@ -2241,6 +2302,9 @@ export function AdminView({
                                   ({tx.groupCode})
                                 </span>
                               ) : null}
+                            </td>
+                            <td className="py-3.5 px-4 text-xs font-semibold whitespace-nowrap">
+                              <span className={tx.status === 'Confirmed' ? 'text-[#1DB954]' : tx.status === 'Pending' ? 'text-amber-400' : tx.status === 'Failed' || tx.status === 'Voided' ? 'text-red-400' : 'text-[#B3B3B3]'}>{tx.status}</span>
                             </td>
                             <td className="py-3.5 px-4 text-xs font-medium text-[#B3B3B3] whitespace-nowrap">
                               {tx.source}
@@ -2275,7 +2339,7 @@ export function AdminView({
                         </div>
                         <div className="pt-2 border-t border-white/10 flex items-center justify-between text-xs text-[#B3B3B3] tabular-nums">
                           <span>
-                            {tx.referenceId} · {tx.source}
+                            {tx.referenceId} · {tx.source} · <span className={tx.status === 'Confirmed' ? 'text-[#1DB954]' : tx.status === 'Pending' ? 'text-amber-400' : tx.status === 'Failed' || tx.status === 'Voided' ? 'text-red-400' : 'text-[#B3B3B3]'}>{tx.status}</span>
                           </span>
                           <span>{formatDisplayDate(tx.date)}</span>
                         </div>

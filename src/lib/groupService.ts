@@ -73,9 +73,13 @@ export async function fetchAdminGroups(): Promise<SubscriptionGroup[]> {
     .select('id, name, monthly_price, currency')
     .in('id', productIds);
   if (prodError) throw new Error(prodError.message);
-  const productById = new Map<string, { name: string }>();
-  for (const p of (products ?? []) as Array<{ id: string; name: string }>) {
-    productById.set(p.id, { name: p.name });
+  const productById = new Map<string, { name: string; monthlyPrice: number; currencySymbol: string }>();
+  for (const p of (products ?? []) as Array<{ id: string; name: string; monthly_price: number; currency: string }>) {
+    productById.set(p.id, {
+      name: p.name,
+      monthlyPrice: Number(p.monthly_price ?? 0),
+      currencySymbol: p.currency === 'NGN' ? '₦' : String(p.currency ?? 'USD').toUpperCase(),
+    });
   }
 
   const slotIds = slots.map((s: Record<string, unknown>) => s.id as string);
@@ -186,6 +190,8 @@ export async function fetchAdminGroups(): Promise<SubscriptionGroup[]> {
       groupCode: s.group_code ?? '—',
       planId: s.product_id,
       planName: productById.get(s.product_id)?.name ?? '—',
+      planMonthlyPrice: productById.get(s.product_id)?.monthlyPrice ?? 0,
+      planCurrencySymbol: productById.get(s.product_id)?.currencySymbol ?? '₦',
       homeAddress: s.home_address ?? '',
       inviteLink: s.invite_link ?? '',
       maxSlots: Number(s.capacity ?? 6),
@@ -369,13 +375,15 @@ export async function setGroupLeader(groupId: string, membershipId: string): Pro
 
 export async function setMembershipPayment(
   membershipId: string,
-  paid: boolean
+  paid: boolean,
+  source: 'admin_marked_paid' | 'support_collected' = 'admin_marked_paid'
 ): Promise<void> {
   const sb = requireSupabase();
   await requireFirebaseToken();
-  const { error } = await sb.rpc('set_membership_payment', {
+  const { error } = await sb.rpc('set_membership_payment_with_ledger', {
     p_membership_id: membershipId,
     p_paid: paid,
+    p_source: source,
   });
   if (error) throw new Error(error.message);
 }

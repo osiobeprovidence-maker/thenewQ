@@ -33,7 +33,7 @@ async function requireFirebaseToken(): Promise<string> {
   return user.getIdToken();
 }
 
-/** Verified payment ledger — real rows from payment_transactions only. */
+/** Real provider payments, outstanding checkout attempts, and staff-recorded collections. */
 export async function fetchPaymentTransactions(): Promise<PlatformTransaction[]> {
   const sb = requireSupabase();
 
@@ -43,11 +43,29 @@ export async function fetchPaymentTransactions(): Promise<PlatformTransaction[]>
     .order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
   const txs = (rows ?? []) as Array<Record<string, unknown>>;
-  if (txs.length === 0) return [];
+
+  // These two tables are populated by server-side checkout and staff collection flows.
+  // They are queried separately so a schema/RLS rollout issue does not hide provider records.
+  const manualResult = await sb
+    .from('manual_payment_entries')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (manualResult.error) console.warn('Could not load manually recorded collections:', manualResult.error.message);
+  const manualRows = (manualResult.data ?? []) as Array<Record<string, unknown>>;
+
+  const reservationResult = await sb
+    .from('slot_reservations')
+    .select('id, product_id, payer_user_id, expected_amount, expected_currency, reference_id, preferred_group_code, status, created_at')
+    .in('status', ['pending', 'failed', 'expired'])
+    .order('created_at', { ascending: false });
+  if (reservationResult.error) console.warn('Could not load pending checkout reservations:', reservationResult.error.message);
+  const reservationRows = (reservationResult.data ?? []) as Array<Record<string, unknown>>;
 
   // Member display names
   const userIds = [
-    ...new Set(txs.map((t) => t.payer_user_id as string).filter(Boolean)),
+    ...new Set([...txs, ...manualRows, ...reservationRows]
+      .map((t) => t.payer_user_id as string)
+      .filter(Boolean)),
   ];
   const profileByName = new Map<string, string>();
   if (userIds.length > 0) {
@@ -67,8 +85,8 @@ export async function fetchPaymentTransactions(): Promise<PlatformTransaction[]>
   // Group codes for payments that carry a slot reference
   const slotIds = [
     ...new Set(
-      txs
-        .map((t) => ((t.metadata as Record<string, unknown>)?.slot_id as string) ?? null)
+      [...txs, ...manualRows]
+        .map((t) => ((t.metadata as Record<string, unknown>)?.slot_id as string) ?? (t.slot_id as string) ?? null)
         .filter(Boolean) as string[]
     ),
   ];
@@ -85,23 +103,24 @@ export async function fetchPaymentTransactions(): Promise<PlatformTransaction[]>
     }
   }
 
-  return txs.map((t) => {
+  const providerTransactions = txs.map((t) => {
     const metadata = (t.metadata as Record<string, unknown>) ?? {};
-    const rawStatus = (t.status as string) || 'pending';
+    const rawStatus = String(t.status ?? 'pending').toLowerCase();
     const status: PlatformTransaction['status'] =
-      rawStatus === 'success' || rawStatus === 'confirmed'
+      ['success', 'succeeded', 'confirmed', 'paid'].includes(rawStatus)
         ? 'Confirmed'
         : rawStatus === 'failed'
           ? 'Failed'
-          : rawStatus === 'refunded'
+          : ['refunded', 'partially_refunded'].includes(rawStatus)
             ? 'Refunded'
-            : 'Pending';
+            : rawStatus === 'voided'
+              ? 'Voided'
+              : 'Pending';
     const provider = (t.provider as string) || 'verified_checkout';
-    const source: PlatformTransaction['source'] =
-      provider === 'bachs' ? 'bachs' : 'verified_checkout';
+    const source: PlatformTransaction['source'] = provider === 'bachs' ? 'bachs' : 'verified_checkout';
     const currency = (t.currency as string) || 'NGN';
     return {
-      id: String(t.id ?? ''),
+      id: `provider-${String(t.id ?? '')}`,
       referenceId: (t.provider_reference as string) || String(t.id ?? ''),
       date: (t.created_at as string) ?? new Date().toISOString(),
       memberName: profileByName.get(t.payer_user_id as string) ?? 'Member',
@@ -109,10 +128,59 @@ export async function fetchPaymentTransactions(): Promise<PlatformTransaction[]>
       groupCode: slotCode.get((metadata.slot_id as string) ?? '') || undefined,
       source,
       amount: Number(t.amount ?? 0),
-      currencySymbol: currency === 'NGN' ? '₦' : '$',
+      currencySymbol: currency === 'NGN' ? '₦' : currency,
       status,
     };
   });
+
+  const manualTransactions = manualRows.map((t) => {
+    const metadata = (t.metadata as Record<string, unknown>) ?? {};
+    const slotId = String(t.slot_id ?? metadata.slot_id ?? '');
+    const currency = String(t.currency ?? 'NGN').toUpperCase();
+    return {
+      id: `manual-${String(t.id ?? '')}`,
+      referenceId: String(t.reference_id ?? t.id ?? ''),
+      date: String(t.created_at ?? new Date().toISOString()),
+      memberName: profileByName.get(String(t.payer_user_id ?? '')) ?? 'Member',
+      planName: String(metadata.product_name ?? 'Subscription'),
+      groupCode: slotCode.get(slotId) || undefined,
+      source: t.source === 'support_collected' ? 'Support Collected' as const : 'Admin Marked Paid' as const,
+      amount: Number(t.amount ?? 0),
+      currencySymbol: currency === 'NGN' ? '₦' : currency,
+      status: t.status === 'voided' ? 'Voided' as const : 'Confirmed' as const,
+    };
+  });
+
+  const productIds = [...new Set(reservationRows.map((t) => String(t.product_id ?? '')).filter(Boolean))];
+  const productNameById = new Map<string, string>();
+  if (productIds.length > 0) {
+    const { data: products, error: productsError } = await sb
+      .from('subscription_products')
+      .select('id, name')
+      .in('id', productIds);
+    if (!productsError && products) {
+      for (const product of products as Array<Record<string, unknown>>) {
+        productNameById.set(String(product.id), String(product.name ?? 'Subscription'));
+      }
+    }
+  }
+  const pendingTransactions = reservationRows.map((t) => ({
+    id: `reservation-${String(t.id ?? '')}`,
+    referenceId: String(t.reference_id ?? t.id ?? ''),
+    date: String(t.created_at ?? new Date().toISOString()),
+    memberName: profileByName.get(String(t.payer_user_id ?? '')) ?? 'Member',
+    planName: productNameById.get(String(t.product_id ?? '')) ?? 'Subscription',
+    groupCode: String(t.preferred_group_code ?? '') || undefined,
+    source: 'Pending Checkout' as const,
+    amount: Number(t.expected_amount ?? 0),
+    currencySymbol: String(t.expected_currency ?? 'NGN').toUpperCase() === 'NGN'
+      ? '₦'
+      : String(t.expected_currency ?? 'USD').toUpperCase(),
+    status: t.status === 'pending' ? 'Pending' as const : 'Failed' as const,
+  }));
+
+  return [...providerTransactions, ...manualTransactions, ...pendingTransactions]
+    .sort((a, b) => b.date.localeCompare(a.date));
 }
 
 /** Real subscription statistics derived from slot_memberships rows. */
