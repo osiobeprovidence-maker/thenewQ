@@ -1322,16 +1322,7 @@ export function ProfileView({
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 space-y-8">
           {/* Top Breadcrumb & Member Identity Header */}
           <div className="flex flex-col gap-6 rounded-2xl border border-white/10 bg-[#121212] p-6 sm:p-8">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <button
-                type="button"
-                onClick={onBackToPlans}
-                className="inline-flex items-center gap-2 text-sm font-medium text-[#B3B3B3] hover:text-white transition-colors cursor-pointer"
-              >
-                <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-                <span>Back to Available Plans</span>
-              </button>
-
+            <div className="flex flex-wrap items-center justify-end gap-4">
               <div className="flex flex-wrap items-center gap-2.5 sm:gap-3">
                 {/* Invite Somebody Icon Button */}
                 <button
