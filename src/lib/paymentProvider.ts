@@ -1,7 +1,7 @@
 /**
  * Bachs checkout integration for the frontend.
  *
- * Contract matches the backend callable `createBachsCheckout`:
+ * Contract matches the Supabase Edge Function `bachs-create-checkout`:
  *   input:  { productId, beneficiaryUserId?, preferredGroupCode?, successUrl?,
  *             customerEmail?, customerName? }
  *   output: { id, checkoutUrl, reference, status }
@@ -11,9 +11,11 @@
  * success is decided by the webhook callback + reservation status.
  */
 
-import { getFunctions, httpsCallable } from 'firebase/functions';
-import { app } from './firebase.js';
+import { auth } from './firebase.js';
 import { supabase } from './supabase.js';
+
+const FUNCTIONS_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`;
+const CHECKOUT_TIMEOUT_MS = 15_000;
 
 export interface StartCheckoutParams {
   productId: string;
@@ -34,50 +36,82 @@ export type StartCheckoutResult =
     }
   | { ok: false; error: string };
 
+async function requireFirebaseToken(): Promise<string> {
+  const user = auth?.currentUser;
+  if (!user) {
+    throw new Error('Sign in before starting checkout.');
+  }
+  return user.getIdToken();
+}
+
 /**
- * Invokes the backend callable that creates an authoritative pending
+ * Invokes the Edge Function that creates an authoritative pending
  * reservation and a Bachs checkout session.
  */
 export async function startBachsCheckout(
   params: StartCheckoutParams
 ): Promise<StartCheckoutResult> {
-  if (!app) {
-    return { ok: false, error: 'Firebase is not configured.' };
-  }
-
   try {
-    const functions = getFunctions(app, 'us-central1');
-    const createBachsCheckout = httpsCallable<
-      StartCheckoutParams,
-      { id: string; checkoutUrl: string; reference: string; status: string }
-    >(functions, 'createBachsCheckout');
+    const token = await requireFirebaseToken();
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), CHECKOUT_TIMEOUT_MS);
 
-    const result = await createBachsCheckout({
-      productId: params.productId,
-      beneficiaryUserId: params.beneficiaryUserId,
-      preferredGroupCode: params.preferredGroupCode,
-      successUrl: params.successUrl,
-      customerEmail: params.customerEmail,
-      customerName: params.customerName,
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${FUNCTIONS_BASE}/bachs-create-checkout`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          productId: params.productId,
+          beneficiaryUserId: params.beneficiaryUserId,
+          preferredGroupCode: params.preferredGroupCode,
+          successUrl: params.successUrl,
+          customerEmail: params.customerEmail,
+          customerName: params.customerName,
+        }),
+        signal: controller.signal,
+      });
+    } finally {
+      window.clearTimeout(timeout);
+    }
 
-    const data = result.data;
-    if (!data?.checkoutUrl || !data.reference) {
+    const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+
+    if (!res.ok) {
+      const message =
+        (body?.error as string) ||
+        (res.status === 404
+          ? 'This payment product is not available yet. Please try again later.'
+          : 'Could not start checkout. Please try again or contact support.');
+      if (res.status === 401 && auth?.currentUser) {
+        // Token may be stale — one forced refresh attempt is handled by callers on next try.
+        console.warn('[PaymentProvider] 401 from bachs-create-checkout');
+      }
+      return { ok: false, error: message };
+    }
+
+    const checkoutUrl = body?.checkoutUrl;
+    const reference = body?.reference;
+    if (!checkoutUrl || !reference) {
       return { ok: false, error: 'Malformed response from checkout server.' };
     }
 
     return {
       ok: true,
-      reference: data.reference,
-      checkoutUrl: data.checkoutUrl,
-      checkoutId: data.id,
-      status: data.status ?? 'pending',
+      reference: String(reference),
+      checkoutUrl: String(checkoutUrl),
+      checkoutId: (body?.id as string) || undefined,
+      status: (body?.status as string) ?? 'pending',
     };
   } catch (error: any) {
-    console.error('[PaymentProvider] createBachsCheckout failed:', error);
+    console.error('[PaymentProvider] startBachsCheckout failed:', error);
     const message =
-      error?.message ||
-      'Could not start checkout. Please try again or contact support.';
+      error?.name === 'AbortError'
+        ? 'The payment server took too long to respond. Please try again.'
+        : error?.message || 'Could not start checkout. Please try again or contact support.';
     return { ok: false, error: message };
   }
 }
@@ -132,19 +166,29 @@ export async function cancelMyMembership(args: {
   membershipId?: string;
   referenceId?: string;
 }): Promise<{ cancelled: boolean; persisted: boolean; alreadyCancelled?: boolean; error?: string }> {
-  if (!app) {
-    return { cancelled: true, persisted: false, error: 'Firebase is not configured.' };
+  if (!supabase || !auth?.currentUser) {
+    return { cancelled: false, persisted: false, error: 'You must be signed in to cancel.' };
   }
 
   try {
-    const functions = getFunctions(app, 'us-central1');
-    const cancel = httpsCallable<
-      { membershipId?: string; referenceId?: string },
-      { cancelled: boolean; persisted: boolean; alreadyCancelled?: boolean }
-    >(functions, 'cancelMyMembership');
-
-    const result = await cancel(args);
-    return result.data;
+    const { data, error } = await supabase.rpc('cancel_my_membership', {
+      p_membership_id: args.membershipId ?? null,
+      p_reference_id: args.referenceId ?? null,
+    });
+    if (error) {
+      console.error('[PaymentProvider] cancelMyMembership failed:', error);
+      return { cancelled: false, persisted: false, error: error.message };
+    }
+    const result = (data ?? {}) as {
+      cancelled?: boolean;
+      persisted?: boolean;
+      alreadyCancelled?: boolean;
+    };
+    return {
+      cancelled: result.cancelled ?? true,
+      persisted: result.persisted ?? true,
+      alreadyCancelled: result.alreadyCancelled,
+    };
   } catch (error: any) {
     console.error('[PaymentProvider] cancelMyMembership failed:', error);
     return { cancelled: false, persisted: false, error: error?.message ?? 'Cancellation failed.' };
