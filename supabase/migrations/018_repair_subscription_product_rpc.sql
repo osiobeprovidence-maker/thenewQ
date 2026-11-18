@@ -53,7 +53,7 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION public.create_subscription_product(text, numeric, text, text, text, text, text, jsonb) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.create_subscription_product(text, numeric, text, text, text, text, text, jsonb) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.create_subscription_product(text, numeric, text, text, text, text, text, jsonb) TO authenticated, anon;
 
 NOTIFY pgrst, 'reload schema';
 COMMIT;
