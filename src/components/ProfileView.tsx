@@ -66,6 +66,7 @@ interface ProfileViewProps {
   sponsoredSlots: SponsoredSlot[];
   onBackToPlans: () => void;
   onJoinNewSlot: () => void;
+  onSelectMarketplacePlan: (plan: SubscriptionPlan) => void;
   onOpenAdminConsole?: () => void;
   staffAccess?: 'superAdmin' | 'admin' | 'support' | null;
   /** Designated bootstrap account that may claim super admin access. */
@@ -111,6 +112,7 @@ export function ProfileView({
   sponsoredSlots,
   onBackToPlans,
   onJoinNewSlot,
+  onSelectMarketplacePlan,
   onOpenAdminConsole,
   staffAccess,
   designatedSuperAdminAvailable,
@@ -941,7 +943,7 @@ export function ProfileView({
       )}
 
       {subView === 'marketplace' && (
-        <MarketplaceView onBackToProfile={() => openSubPage('settings')} />
+        <MarketplaceView plans={plans} onSelectPlan={onSelectMarketplacePlan} onBackToProfile={() => openSubPage('settings')} />
       )}
 
       {/* SUB-VIEW 2: DEDICATED INVITE SOMEBODY PAGE (MATCHING INBOX DESIGN) */}

@@ -803,7 +803,17 @@ export default function App() {
   }): Promise<void> => {
     try {
       await createSubscriptionProduct({ name, category, description, monthlyPrice: priceMonthly });
-      refreshPlans();
+      const refreshedPlans = await fetchLiveSubscriptionPlans();
+      const createdPlan = refreshedPlans.find((plan) => plan.name.trim().toLowerCase() === name.trim().toLowerCase());
+      if (!createdPlan) {
+        if (refreshedPlans.length > 0) {
+          setPlans(refreshedPlans);
+          setLivePlanIds(new Set(refreshedPlans.map((plan) => plan.id)));
+        }
+        throw new Error('The plan was saved, but it is not appearing in the live catalog. Check that it is active and try refreshing.');
+      }
+      setPlans(refreshedPlans);
+      setLivePlanIds(new Set(refreshedPlans.map((plan) => plan.id)));
     } catch (err: unknown) {
       console.warn('Could not create subscription plan:', err);
       throw new Error(err instanceof Error ? err.message : 'Unexpected database error while saving the plan.');
@@ -909,6 +919,7 @@ export default function App() {
             sponsoredSlots={sponsoredSlots}
             onBackToPlans={() => navigateToSection('plans')}
             onJoinNewSlot={handleJoinNowFromNav}
+            onSelectMarketplacePlan={openJoinModalForPlan}
             onOpenAdminConsole={currentUser && canOpenStaffConsole ? openAdminView : undefined}
             staffAccess={staffAccess}
             designatedSuperAdminAvailable={designatedSuperAdminAvailable && staffAccess === null}
