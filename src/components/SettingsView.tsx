@@ -86,7 +86,12 @@ export function SettingsView({
       setSuccess(`Verification code sent to ${normalized}.`);
     } catch (err) {
       recaptchaRef.current = null;
-      setError(err instanceof Error ? err.message : 'Could not send a verification code.');
+      const firebaseCode = (err as { code?: string })?.code;
+      if (firebaseCode === 'auth/operation-not-allowed') {
+        setSuccess('Your number is saved, but SMS verification is not enabled for this region yet. You can verify later.');
+      } else {
+        setError(err instanceof Error ? err.message : 'Could not send a verification code.');
+      }
     } finally {
       setPhoneBusy(false);
     }

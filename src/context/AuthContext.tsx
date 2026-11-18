@@ -287,10 +287,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       updated_at: new Date().toISOString(),
     };
 
-    const { error } = await supabase
+    let { error } = await supabase
       .from('profiles')
       .update(updates)
       .eq('user_id', currentUser.uid);
+
+    // Keep contact-number saving usable if production's PostgREST schema cache
+    // has not refreshed after phone_verified was added. The phone itself still
+    // persists, and the verification flag will sync once that column exists.
+    if (
+      error &&
+      Object.prototype.hasOwnProperty.call(updates, 'phone_verified') &&
+      /phone_verified.*schema cache|schema cache.*phone_verified/i.test(error.message)
+    ) {
+      const compatibleUpdates = { ...updates } as Partial<UserProfileData>;
+      delete compatibleUpdates.phone_verified;
+      const retry = await supabase
+        .from('profiles')
+        .update(compatibleUpdates)
+        .eq('user_id', currentUser.uid);
+      error = retry.error;
+    }
 
     if (error) throw error;
 
