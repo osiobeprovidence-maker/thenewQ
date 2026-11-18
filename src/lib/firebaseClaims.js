@@ -24,6 +24,23 @@ export async function callAdminFunction(name, data) {
   return httpsCallable(getFunctionsInstance(), name)(data);
 }
 
+/**
+ * Returns the caller's pending staff invitation (if any).
+ * Returns { pending: false } for unauthenticated callers or errors — never leaks
+ * whether an invitation exists for an arbitrary email.
+ * @returns {Promise<{ pending: boolean, role?: 'admin' | 'support', invitationId?: string }>}
+ */
+export async function checkMyPendingStaffInvitation() {
+  if (!app) return { pending: false };
+  try {
+    const result = await callAdminFunction('checkMyPendingStaffInvitation', {});
+    return /** @type {{ pending: boolean, role?: 'admin' | 'support', invitationId?: string }} */ (result.data) ?? { pending: false };
+  } catch (err) {
+    console.warn('checkMyPendingStaffInvitation failed:', err);
+    return { pending: false };
+  }
+}
+
 export async function ensureAuthenticatedRoleAndRefreshToken() {
   if (!auth) {
     throw new Error('Firebase is not configured. Cannot sync the role claim.');

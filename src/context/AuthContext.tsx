@@ -13,7 +13,7 @@ import {
   ConfirmationResult,
 } from 'firebase/auth';
 import { auth } from '../lib/firebase.js';
-import { ensureAuthenticatedRoleAndRefreshToken, refreshCurrentUserClaims } from '../lib/firebaseClaims.js';
+import { checkMyPendingStaffInvitation, ensureAuthenticatedRoleAndRefreshToken, refreshCurrentUserClaims } from '../lib/firebaseClaims.js';
 import { supabase } from '../lib/supabase.js';
 
 export interface UserProfileData {
@@ -34,6 +34,7 @@ interface AuthContextType {
   isAdmin: boolean;
   isSuperAdmin: boolean;
   isSupport: boolean;
+  hasPendingStaffInvite: boolean;
   loginWithGoogle: () => Promise<void>;
   loginWithEmail: (email: string, pass: string) => Promise<void>;
   signupWithEmail: (email: string, pass: string, fullName: string) => Promise<void>;
@@ -57,6 +58,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAdmin, setIsAdmin] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [isSupport, setIsSupport] = useState(false);
+  const [hasPendingStaffInvite, setHasPendingStaffInvite] = useState(false);
 
   // Sync profile data to Supabase
   const syncProfileToSupabase = async (user: User, customDisplayName?: string) => {
@@ -117,12 +119,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } catch (e) {
           console.warn('Could not refresh claims:', e);
         }
+        try {
+          const pending = await checkMyPendingStaffInvitation();
+          setHasPendingStaffInvite(Boolean(pending?.pending));
+        } catch (e) {
+          console.warn('Could not check pending invitation:', e);
+          setHasPendingStaffInvite(false);
+        }
         await syncProfileToSupabase(user);
       } else {
         setProfile(null);
         setIsAdmin(false);
         setIsSuperAdmin(false);
         setIsSupport(false);
+        setHasPendingStaffInvite(false);
       }
       setLoading(false);
     });
@@ -210,6 +220,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setIsAdmin(claims.isAdmin || claims.isSuperAdmin);
       setIsSuperAdmin(claims.isSuperAdmin);
       setIsSupport(claims.isSupport);
+      const pending = await checkMyPendingStaffInvitation();
+      setHasPendingStaffInvite(Boolean(pending?.pending));
     } catch (e) {
       console.warn('Could not refresh claims:', e);
       throw e;
@@ -225,6 +237,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isAdmin,
         isSuperAdmin,
         isSupport,
+        hasPendingStaffInvite,
         loginWithGoogle,
         loginWithEmail,
         signupWithEmail,

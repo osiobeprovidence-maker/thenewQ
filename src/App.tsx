@@ -124,7 +124,14 @@ function buildAdminInboxMessage({
 }
 
 export default function App() {
-  const { currentUser, profile: authProfile, isAdmin, isSuperAdmin, isSupport } = useAuth();
+  const {
+    currentUser,
+    profile: authProfile,
+    isAdmin,
+    isSuperAdmin,
+    isSupport,
+    hasPendingStaffInvite,
+  } = useAuth();
   const [currentView, setCurrentView] = useState<AppView>('landing');
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [supportPermissions, setSupportPermissions] = useState<SupportPermissions>(
@@ -137,6 +144,8 @@ export default function App() {
       : isSupport
         ? 'support'
         : null;
+  // Visible staff console only for staff or users with a pending invitation.
+  const canOpenStaffConsole = staffAccess !== null || hasPendingStaffInvite;
   const [plans, setPlans] = useState<SubscriptionPlan[]>(SUBSCRIPTION_PLANS);
   const [groups, setGroups] = useState<SubscriptionGroup[]>(INITIAL_SUBSCRIPTION_GROUPS);
   const [platformTransactions, setPlatformTransactions] = useState<PlatformTransaction[]>(
@@ -1204,7 +1213,7 @@ export default function App() {
             sponsoredSlots={sponsoredSlots}
             onBackToPlans={() => navigateToSection('plans')}
             onJoinNewSlot={handleJoinNowFromNav}
-            onOpenAdminConsole={currentUser ? openAdminView : undefined}
+            onOpenAdminConsole={currentUser && canOpenStaffConsole ? openAdminView : undefined}
             staffAccess={staffAccess}
             onTriggerNextPayment={handleTriggerNextPayment}
             onCancelSubscriptionSlot={handleCancelSubscriptionSlot}

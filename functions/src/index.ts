@@ -1149,6 +1149,41 @@ export const listStaffUsers = onCall(
   }
 );
 
+/**
+ * Whether the currently signed-in user has a pending staff invitation bound to their email.
+ * Safe for all callers — only the caller's own record is consulted; non-pending invites are ignored.
+ */
+export const checkMyPendingStaffInvitation = onCall(
+  { region: 'us-central1' },
+  async (request) => {
+    const caller = request.auth;
+    if (!caller) {
+      return { pending: false as const };
+    }
+    const email = normalizeEmail((caller.token as any)?.email);
+    if (!email) {
+      return { pending: false as const };
+    }
+
+    const snapshot = await firestore
+      .collection('admin_invitations')
+      .where('emailNormalized', '==', email)
+      .where('status', '==', 'pending')
+      .limit(1)
+      .get();
+
+    if (snapshot.empty) {
+      return { pending: false as const };
+    }
+    const data = snapshot.docs[0].data();
+    return {
+      pending: true as const,
+      role: parseStaffRole(data.role) ?? ('admin' as const),
+      invitationId: snapshot.docs[0].id,
+    };
+  }
+);
+
 /** Reads the most recent administrative audit log entries. Super admins and admins only. */
 export const listAdminAuditLog = onCall(
   { region: 'us-central1' },

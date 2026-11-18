@@ -1388,13 +1388,13 @@ export function ProfileView({
                   )}
                 </button>
 
-                {/* Staff console — hidden destination; visible to signed-in users only */}
+                {/* Staff console — only for staff or invited users */}
                 {onOpenAdminConsole && (
                   <button
                     type="button"
                     onClick={onOpenAdminConsole}
-                    aria-label={staffAccess ? 'Open staff console' : 'Staff console sign in'}
-                    title={staffAccess ? 'Staff Console' : 'Staff Sign In'}
+                    aria-label="Open staff console"
+                    title={staffAccess ? 'Staff Console' : 'Redeem staff invitation'}
                     className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/15 bg-[#181818] text-white transition-colors hover:border-[#1DB954] hover:text-[#1DB954] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1DB954] cursor-pointer"
                   >
                     <ShieldCheck className="h-5 w-5" aria-hidden="true" />
