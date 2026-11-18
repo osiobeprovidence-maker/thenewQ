@@ -786,7 +786,7 @@ export default function App() {
     }
   };
 
-  const handleAddPlan = ({
+  const handleAddPlan = async ({
     name,
     category,
     description,
@@ -800,13 +800,14 @@ export default function App() {
     priceMonthly: number;
     totalSlots: number;
     status: PlanStatus;
-  }) => {
-    void createSubscriptionProduct({ name, category, description, monthlyPrice: priceMonthly })
-      .then(() => refreshPlans())
-      .catch((err: unknown) => {
-        console.warn('Could not create subscription plan:', err);
-        window.alert('Could not save the plan. Check permissions and try again.');
-      });
+  }): Promise<void> => {
+    try {
+      await createSubscriptionProduct({ name, category, description, monthlyPrice: priceMonthly });
+      refreshPlans();
+    } catch (err: unknown) {
+      console.warn('Could not create subscription plan:', err);
+      throw new Error(err instanceof Error ? err.message : 'Unexpected database error while saving the plan.');
+    }
   };
 
   const handleTogglePlanStatus = (planId: string) => {

@@ -115,7 +115,7 @@ interface AdminViewProps {
     priceMonthly: number;
     totalSlots: number;
     status: PlanStatus;
-  }) => void;
+  }) => Promise<void>;
   onTogglePlanStatus: (planId: string) => void;
 }
 
@@ -217,6 +217,7 @@ export function AdminView({
   const [planSlots, setPlanSlots] = useState('6');
   const [planInitialStatus, setPlanInitialStatus] = useState<PlanStatus>('available');
   const [planFormError, setPlanFormError] = useState<string | null>(null);
+  const [isSavingPlan, setIsSavingPlan] = useState(false);
 
   // Ensure support users always land on groups tab
   useEffect(() => {
@@ -424,7 +425,7 @@ export function AdminView({
     }
   };
 
-  const handleAddPlanSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleAddPlanSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmedName = planName.trim();
     const trimmedCategory = planCategory.trim();
@@ -454,20 +455,27 @@ export function AdminView({
     }
 
     setPlanFormError(null);
-    onAddPlan({
-      name: trimmedName,
-      category: trimmedCategory,
-      description: trimmedDesc,
-      priceMonthly: parsedPrice,
-      totalSlots: parsedSlots,
-      status: planInitialStatus,
-    });
-    setPlanName('');
-    setPlanCategory('');
-    setPlanDescription('');
-    setPlanPrice('1000');
-    setPlanSlots('6');
-    showNotice(`Listed "${trimmedName}" in Available Plans.`);
+    setIsSavingPlan(true);
+    try {
+      await onAddPlan({
+        name: trimmedName,
+        category: trimmedCategory,
+        description: trimmedDesc,
+        priceMonthly: parsedPrice,
+        totalSlots: parsedSlots,
+        status: planInitialStatus,
+      });
+      setPlanName('');
+      setPlanCategory('');
+      setPlanDescription('');
+      setPlanPrice('1000');
+      setPlanSlots('6');
+      showNotice(`Listed "${trimmedName}" in Available Plans.`);
+    } catch (error) {
+      setPlanFormError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsSavingPlan(false);
+    }
   };
 
   // Aggregate Platform Metrics
@@ -2008,10 +2016,11 @@ export function AdminView({
 
                 <button
                   type="submit"
-                  className="w-full inline-flex items-center justify-center gap-2 min-h-[46px] rounded-full bg-[#1DB954] px-6 py-3 text-sm font-bold text-black hover:bg-[#15803D] hover:text-white transition-colors cursor-pointer"
+                  disabled={isSavingPlan}
+                  className="w-full inline-flex items-center justify-center gap-2 min-h-[46px] rounded-full bg-[#1DB954] px-6 py-3 text-sm font-bold text-black hover:bg-[#15803D] hover:text-white transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-wait"
                 >
                   <Plus className="h-4 w-4" aria-hidden="true" />
-                  <span>List Subscription · {formatAmount(Number(planPrice) || 0)}/mo</span>
+                  <span>{isSavingPlan ? 'Saving…' : `List Subscription · ${formatAmount(Number(planPrice) || 0)}/mo`}</span>
                 </button>
               </form>
             </div>
