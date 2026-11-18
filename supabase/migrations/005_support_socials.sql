@@ -5,8 +5,11 @@
 -- Creates one key/value configuration table used by the public footer.
 -- Strictly additive: no existing object is altered or dropped.
 -- Firebase ID tokens are passed through as the Supabase bearer token, so the
--- shared claim predicates from migration 003 apply directly.
+-- custom claims arrive as top-level JWT keys (see migration 003 header).
+-- Self-contained: no dependency on migration 003's helper functions.
 -- ==============================================================================
+
+BEGIN;
 
 CREATE TABLE IF NOT EXISTS public.app_settings (
   key text PRIMARY KEY,
@@ -27,8 +30,8 @@ CREATE POLICY "Anyone can read app settings"
 DROP POLICY IF EXISTS "Super admins can write app settings" ON public.app_settings;
 CREATE POLICY "Super admins can write app settings"
   ON public.app_settings FOR ALL
-  USING (public.is_super_admin())
-  WITH CHECK (public.is_super_admin());
+  USING (coalesce((auth.jwt() ->> 'superAdmin')::boolean, false))
+  WITH CHECK (coalesce((auth.jwt() ->> 'superAdmin')::boolean, false));
 
 -- Keep updated_at fresh on every write.
 CREATE OR REPLACE FUNCTION public.touch_app_settings_updated_at()
@@ -56,3 +59,5 @@ VALUES (
   '{"whatsapp": {"enabled": true, "number": "2348000000000"}, "socials": []}'::jsonb
 )
 ON CONFLICT (key) DO NOTHING;
+
+COMMIT;
