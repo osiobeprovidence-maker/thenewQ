@@ -13,7 +13,7 @@ import {
   ConfirmationResult,
 } from 'firebase/auth';
 import { auth } from '../lib/firebase.js';
-import { checkMyPendingStaffInvitation, ensureAuthenticatedRoleAndRefreshToken, refreshCurrentUserClaims } from '../lib/firebaseClaims.js';
+import { checkMyPendingStaffInvitation, fetchStaffAccess } from '../lib/staffAccess';
 import { supabase } from '../lib/supabase.js';
 
 export interface UserProfileData {
@@ -112,12 +112,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setCurrentUser(user);
       if (user) {
         try {
-          const claims = await ensureAuthenticatedRoleAndRefreshToken();
-          setIsAdmin(claims.isAdmin || claims.isSuperAdmin);
-          setIsSuperAdmin(claims.isSuperAdmin);
-          setIsSupport(claims.isSupport);
+          const access = await fetchStaffAccess();
+          setIsAdmin(access.isAdmin);
+          setIsSuperAdmin(access.isSuperAdmin);
+          setIsSupport(access.isSupport);
         } catch (e) {
-          console.warn('Could not refresh claims:', e);
+          console.warn('Could not fetch staff access:', e);
         }
         try {
           const pending = await checkMyPendingStaffInvitation();
@@ -216,14 +216,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshClaims = async () => {
     if (!currentUser) return;
     try {
-      const claims = await refreshCurrentUserClaims();
-      setIsAdmin(claims.isAdmin || claims.isSuperAdmin);
-      setIsSuperAdmin(claims.isSuperAdmin);
-      setIsSupport(claims.isSupport);
+      const access = await fetchStaffAccess();
+      setIsAdmin(access.isAdmin);
+      setIsSuperAdmin(access.isSuperAdmin);
+      setIsSupport(access.isSupport);
       const pending = await checkMyPendingStaffInvitation();
       setHasPendingStaffInvite(Boolean(pending?.pending));
     } catch (e) {
-      console.warn('Could not refresh claims:', e);
+      console.warn('Could not refresh staff access:', e);
       throw e;
     }
   };

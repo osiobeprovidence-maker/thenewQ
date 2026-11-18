@@ -35,7 +35,19 @@ import {
   formatPlanPrice,
 } from '../data/subscriptions';
 import { useAuth } from '../context/AuthContext';
-import { bootstrapSuperAdmin, callAdminFunction } from '../lib/firebaseClaims.js';
+import {
+  bootstrapSuperAdmin,
+  createInvitation,
+  fetchAuditLog,
+  listInvitations,
+  listStaffMembers,
+  redeemStaffInvitation,
+  revokeInvitation,
+  revokeStaffRole,
+  type AdminInvitationRecord,
+  type AuditLogRecord,
+  type StaffMemberRecord,
+} from '../lib/staffAccess';
 import { SupportSocialsPanel } from './SupportSocialsPanel';
 
 /** Strips noisy Firebase prefixes so callable errors read naturally in the UI. */
@@ -468,9 +480,9 @@ export function AdminView({
     setInviteRedeemState('loading');
     setInviteRedeemMessage(null);
     try {
-      await callAdminFunction('redeemAdminInvitation', {});
+      await redeemStaffInvitation();
       await refreshClaims();
-      // Claims now flow through context; the gate below opens automatically.
+      // Staff role now flows through context; the gate below opens automatically.
       setInviteRedeemState('idle');
       setInviteRedeemMessage(null);
     } catch (e) {
@@ -2166,7 +2178,11 @@ export function AdminView({
 
             {/* Right Column: Team Access (Super Admin) + Administrative Audit Log */}
             <div className="lg:col-span-4 space-y-4">
-              {isSuperAdmin && <SuperAdminTeamPanel currentUid={currentUser?.uid ?? ''} />}
+              {isSuperAdmin && (
+                <SuperAdminTeamPanel
+                  currentEmail={(currentUser?.email ?? '').trim().toLowerCase()}
+                />
+              )}
               {(isSuperAdmin || isAdmin) && <AdminAuditLogPanel />}
             </div>
             </div>
@@ -2408,12 +2424,8 @@ export function AdminView({
 // ============================================================================
 
 interface StaffUser {
-  uid: string;
   email: string | null;
-  disabled: boolean;
-  superAdmin: boolean;
-  admin: boolean;
-  support: boolean;
+  role: 'superAdmin' | 'admin' | 'support';
 }
 
 interface AdminInvitation {
@@ -2421,23 +2433,22 @@ interface AdminInvitation {
   email: string;
   role: 'admin' | 'support';
   note: string | null;
-  status: 'pending' | 'accepted' | 'revoked' | 'expired';
-  code: string | null;
+  status: 'pending' | 'redeemed' | 'revoked';
   invitedByEmail: string | null;
-  createdAt: number | null;
-  expiresAt: number | null;
-  acceptedAt: number | null;
+  createdAt: string | null;
+  redeemedAt: string | null;
 }
 
 const INVITE_STATUS_CLASSES: Record<string, string> = {
   pending: 'text-amber-400',
-  accepted: 'text-[#1DB954]',
+  redeemed: 'text-[#1DB954]',
   revoked: 'text-red-400',
-  expired: 'text-[#B3B3B3]',
 };
 
-function formatAuditTimestamp(ms: number | null): string {
-  if (!ms) return '—';
+function formatAuditTimestamp(iso: string | null): string {
+  if (!iso) return '—';
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return '—';
   return new Date(ms).toLocaleString('en-NG', {
     day: 'numeric',
     month: 'short',
@@ -2447,7 +2458,20 @@ function formatAuditTimestamp(ms: number | null): string {
   });
 }
 
-function SuperAdminTeamPanel({ currentUid }: { currentUid: string }) {
+function mapInvitation(row: AdminInvitationRecord): AdminInvitation {
+  return {
+    invitationId: row.id,
+    email: row.email,
+    role: row.role,
+    note: row.note,
+    status: row.status,
+    invitedByEmail: row.invited_by,
+    createdAt: row.created_at,
+    redeemedAt: row.redeemed_at,
+  };
+}
+
+function SuperAdminTeamPanel({ currentEmail }: { currentEmail: string }) {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'admin' | 'support'>('support');
   const [inviteNote, setInviteNote] = useState('');
@@ -2467,16 +2491,18 @@ function SuperAdminTeamPanel({ currentUid }: { currentUid: string }) {
     setListsLoading(true);
     setListsError(null);
     const [staffRes, invitationsRes] = await Promise.allSettled([
-      callAdminFunction('listStaffUsers', {}),
-      callAdminFunction('listAdminInvitations', {}),
+      listStaffMembers(),
+      listInvitations(),
     ]);
     if (staffRes.status === 'fulfilled') {
-      setStaff((((staffRes.value.data as any)?.staff) as StaffUser[]) ?? []);
+      setStaff(
+        staffRes.value.map((row) => ({ email: row.email, role: row.role }))
+      );
     } else {
       setListsError(friendlyCallableError(staffRes.reason));
     }
     if (invitationsRes.status === 'fulfilled') {
-      setInvitations((((invitationsRes.value.data as any)?.invitations) as AdminInvitation[]) ?? []);
+      setInvitations(invitationsRes.value.map(mapInvitation));
     } else {
       setListsError(friendlyCallableError(invitationsRes.reason));
     }
@@ -2493,12 +2519,8 @@ function SuperAdminTeamPanel({ currentUid }: { currentUid: string }) {
     setIsCreating(true);
     void (async () => {
       try {
-        const result = await callAdminFunction('createAdminInvitation', {
-          email: inviteEmail.trim(),
-          role: inviteRole,
-          note: inviteNote.trim(),
-        });
-        setCreatedInvite(result.data as AdminInvitation & { reused?: boolean });
+        const result = await createInvitation(inviteEmail.trim(), inviteRole, inviteNote.trim() || undefined);
+        setCreatedInvite({ ...mapInvitation(result.invitation), reused: result.reused });
         setInviteEmail('');
         setInviteNote('');
         await loadAll();
@@ -2518,7 +2540,7 @@ function SuperAdminTeamPanel({ currentUid }: { currentUid: string }) {
       `1. Sign in with this invited Google account at the app.\n` +
       `2. Open your Profile and tap the staff console button.\n` +
       `3. Choose "Redeem Staff Invitation".\n\n` +
-      `Invitation code: ${createdInvite.code ?? 'n/a'} (valid for 7 days).`;
+      `The invite is bound to ${createdInvite.email} — access activates the moment you redeem it.`;
     try {
       await navigator.clipboard.writeText(message);
       setInviteCopied(true);
@@ -2531,17 +2553,17 @@ function SuperAdminTeamPanel({ currentUid }: { currentUid: string }) {
   const handleRevokeInvitation = async (invitationId: string) => {
     setActionError(null);
     try {
-      await callAdminFunction('revokeAdminInvitation', { invitationId });
+      await revokeInvitation(invitationId);
       await loadAll();
     } catch (error) {
       setActionError(friendlyCallableError(error));
     }
   };
 
-  const handleRevokeAccess = async (targetUid: string, role: 'admin' | 'support') => {
+  const handleRevokeAccess = async (targetEmail: string, role: 'admin' | 'support') => {
     setActionError(null);
     try {
-      await callAdminFunction('revokeAdminAccess', { targetUid, role });
+      await revokeStaffRole(targetEmail, role);
       setConfirmingRevokeId(null);
       await loadAll();
     } catch (error) {
@@ -2631,13 +2653,8 @@ function SuperAdminTeamPanel({ currentUid }: { currentUid: string }) {
             {createdInvite.reused ? 'Existing pending invitation reused' : 'Invitation created'}
           </p>
           <p className="text-[#B3B3B3]">
-            Share this message with <span className="text-white">{createdInvite.email}</span>. The code is shown here; it is also stored in the invitation record.
+            Share this message with <span className="text-white">{createdInvite.email}</span>. The invitation is bound to that email address.
           </p>
-          {createdInvite.code && (
-            <p className="font-mono text-base font-extrabold text-[#1DB954] tabular-nums tracking-wider">
-              {createdInvite.code}
-            </p>
-          )}
           <button
             type="button"
             onClick={handleCopyInviteMessage}
@@ -2683,44 +2700,43 @@ function SuperAdminTeamPanel({ currentUid }: { currentUid: string }) {
           <ul className="space-y-2">
             {staff.map((member) => (
               <li
-                key={member.uid}
+                key={member.email ?? 'staff-unknown'}
                 className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#121212] px-3.5 py-2.5"
               >
                 <div className="min-w-0">
-                  <p className="text-xs font-semibold text-white truncate">{member.email ?? member.uid}</p>
+                  <p className="text-xs font-semibold text-white truncate">{member.email ?? 'unknown'}</p>
                   <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide">
-                    {member.superAdmin && <span className="text-[#1DB954]">Super Admin</span>}
-                    {member.admin && <span className="text-sky-400">Admin</span>}
-                    {member.support && <span className="text-amber-400">Support</span>}
-                    {member.disabled && <span className="text-red-400">Disabled</span>}
+                    {member.role === 'superAdmin' && <span className="text-[#1DB954]">Super Admin</span>}
+                    {member.role === 'admin' && <span className="text-sky-400">Admin</span>}
+                    {member.role === 'support' && <span className="text-amber-400">Support</span>}
                   </p>
                 </div>
-                {!member.superAdmin && member.uid !== currentUid && (
+                {member.role !== 'superAdmin' && member.email && member.email !== currentEmail && (
                   <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                    {member.admin && (
+                    {member.role === 'admin' && (
                       <button
                         type="button"
                         onClick={() =>
-                          confirmingRevokeId === `${member.uid}:admin`
-                            ? void handleRevokeAccess(member.uid, 'admin')
-                            : setConfirmingRevokeId(`${member.uid}:admin`)
+                          confirmingRevokeId === `${member.email}:admin`
+                            ? void handleRevokeAccess(member.email as string, 'admin')
+                            : setConfirmingRevokeId(`${member.email}:admin`)
                         }
                         className="min-h-[30px] rounded-full border border-red-500/40 bg-red-500/10 px-2.5 py-1 text-[10px] font-bold text-red-300 hover:bg-red-500/20 hover:text-white transition-colors cursor-pointer"
                       >
-                        {confirmingRevokeId === `${member.uid}:admin` ? 'Confirm revoke admin' : 'Revoke admin'}
+                        {confirmingRevokeId === `${member.email}:admin` ? 'Confirm revoke admin' : 'Revoke admin'}
                       </button>
                     )}
-                    {member.support && (
+                    {member.role === 'support' && (
                       <button
                         type="button"
                         onClick={() =>
-                          confirmingRevokeId === `${member.uid}:support`
-                            ? void handleRevokeAccess(member.uid, 'support')
-                            : setConfirmingRevokeId(`${member.uid}:support`)
+                          confirmingRevokeId === `${member.email}:support`
+                            ? void handleRevokeAccess(member.email as string, 'support')
+                            : setConfirmingRevokeId(`${member.email}:support`)
                         }
                         className="min-h-[30px] rounded-full border border-red-500/40 bg-red-500/10 px-2.5 py-1 text-[10px] font-bold text-red-300 hover:bg-red-500/20 hover:text-white transition-colors cursor-pointer"
                       >
-                        {confirmingRevokeId === `${member.uid}:support` ? 'Confirm revoke support' : 'Revoke support'}
+                        {confirmingRevokeId === `${member.email}:support` ? 'Confirm revoke support' : 'Revoke support'}
                       </button>
                     )}
                   </div>
@@ -2779,17 +2795,15 @@ function SuperAdminTeamPanel({ currentUid }: { currentUid: string }) {
 
 interface AuditLogEntry {
   id: string;
-  type: string;
+  action: string;
   actorEmail: string | null;
   targetEmail: string | null;
-  targetUid: string | null;
   role: string | null;
-  invitationId: string | null;
-  createdAt: number | null;
+  createdAt: string | null;
 }
 
 const AUDIT_TYPE_LABELS: Record<string, string> = {
-  bootstrap_super_admin: 'Super admin bootstrapped',
+  bootstrap_super_admin: 'Super admin granted',
   invitation_created: 'Invitation created',
   invitation_redeemed: 'Staff access granted',
   invitation_revoked: 'Invitation revoked',
@@ -2803,10 +2817,22 @@ function AdminAuditLogPanel() {
 
   useEffect(() => {
     let mounted = true;
-    callAdminFunction('listAdminAuditLog', {})
-      .then((result) => {
+    fetchAuditLog(50)
+      .then((rows) => {
         if (mounted) {
-          setEntries((((result.data as any)?.entries) as AuditLogEntry[]) ?? []);
+          setEntries(
+            rows.map((row) => {
+              const details = (row.details ?? {}) as Record<string, unknown>;
+              return {
+                id: String(row.id),
+                action: row.action,
+                actorEmail: row.actor_email,
+                targetEmail: typeof details.targetEmail === 'string' ? details.targetEmail : null,
+                role: typeof details.role === 'string' ? details.role : null,
+                createdAt: row.created_at,
+              };
+            })
+          );
         }
       })
       .catch((err) => {
@@ -2846,7 +2872,7 @@ function AdminAuditLogPanel() {
         <ul className="space-y-2 max-h-72 overflow-y-auto">
           {entries.map((entry) => (
             <li key={entry.id} className="rounded-xl border border-white/10 bg-[#121212] px-3.5 py-2.5">
-              <p className="text-xs font-semibold text-white">{AUDIT_TYPE_LABELS[entry.type] ?? entry.type}</p>
+              <p className="text-xs font-semibold text-white">{AUDIT_TYPE_LABELS[entry.action] ?? entry.action}</p>
               <p className="mt-0.5 break-words text-[11px] text-[#B3B3B3]">
                 {entry.actorEmail ?? 'unknown'}
                 {entry.targetEmail ? ` → ${entry.targetEmail}` : ''}
