@@ -117,45 +117,6 @@ interface AdminViewProps {
   }) => void;
   onTogglePlanStatus: (planId: string) => void;
 }
-  plans: SubscriptionPlan[];
-  groups: SubscriptionGroup[];
-  transactions: PlatformTransaction[];
-  supportPermissions: SupportPermissions;
-  onBackToSite: () => void;
-  onRequestSignIn: () => void;
-  onUpdateSupportPermissions: (updater: (prev: SupportPermissions) => SupportPermissions) => void;
-  onCreateGroup: (payload: {
-    groupName: string;
-    planId: string;
-    homeAddress: string;
-    maxSlots: number;
-  }) => Promise<string>;
-  onDeleteGroup: (groupId: string) => Promise<void>;
-  onUpdateGroupDetails: (
-    groupId: string,
-    payload: { groupName: string; homeAddress: string; capacity?: number }
-  ) => void;
-  onDispatchGroupToInbox: (groupId: string) => number;
-  onSetGroupLeader: (groupId: string, memberId: string) => void;
-  onToggleMemberPaymentStatus: (groupId: string, memberId: string) => void;
-  onCollectMemberPayment: (groupId: string, memberId: string, collectorRole: PortalRole) => void;
-  onLogMemberContact: (
-    groupId: string,
-    memberId: string,
-    contactedBy: string,
-    note: string
-  ) => void;
-  onRemoveGroupMember: (groupId: string, memberId: string) => void;
-  onAddPlan: (payload: {
-    name: string;
-    category: string;
-    description: string;
-    priceMonthly: number;
-    totalSlots: number;
-    status: PlanStatus;
-  }) => void;
-  onTogglePlanStatus: (planId: string) => void;
-}
 
 type AdminTab = 'groups' | 'subscriptions' | 'financials' | 'settings';
 type TransactionFilter = 'all' | 'users' | 'support';
