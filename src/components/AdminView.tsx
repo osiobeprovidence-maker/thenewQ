@@ -36,6 +36,7 @@ import {
 } from '../data/subscriptions';
 import { useAuth } from '../context/AuthContext';
 import { callAdminFunction } from '../lib/firebaseClaims.js';
+import { SupportSocialsPanel } from './SupportSocialsPanel';
 
 /** Strips noisy Firebase prefixes so callable errors read naturally in the UI. */
 function friendlyCallableError(error: unknown): string {
@@ -1972,7 +1973,10 @@ export function AdminView({
 
         {/* TAB 4: ADMIN SETTINGS (Customer Care Permissions & Role Preview) */}
         {isAdmin && activeTab === 'settings' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div className="space-y-6">
+            {isSuperAdmin && <SupportSocialsPanel />}
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="lg:col-span-8 rounded-2xl border border-white/10 bg-[#181818] p-5 sm:p-7 space-y-6">
               <div className="pb-4 border-b border-white/10">
                 <p className="text-xs font-semibold uppercase tracking-wider text-[#1DB954]">
@@ -2099,6 +2103,7 @@ export function AdminView({
             <div className="lg:col-span-4 space-y-4">
               {isSuperAdmin && <SuperAdminTeamPanel currentUid={currentUser?.uid ?? ''} />}
               {(isSuperAdmin || isAdmin) && <AdminAuditLogPanel />}
+            </div>
             </div>
           </div>
         )}

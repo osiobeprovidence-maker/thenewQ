@@ -1,7 +1,17 @@
-import { Instagram, MessageCircle, Share2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { MessageCircle } from 'lucide-react';
 import { BRAND_INFO } from '../data/subscriptions';
 import type { InfoModalType } from '../types/subscription';
 import { BrandLogo } from './BrandLogo';
+import { PlatformIcon } from './PlatformIcon';
+import {
+  EMPTY_SUPPORT_SOCIALS,
+  displayPhone,
+  getSupportSocials,
+  isValidUrl,
+  resolveWhatsappUrl,
+  type SupportSocialsSettings,
+} from '../lib/settingsService';
 
 interface FooterProps {
   onNavigateSection: (sectionId: string) => void;
@@ -10,6 +20,23 @@ interface FooterProps {
 
 export function Footer({ onNavigateSection, onOpenInfoModal }: FooterProps) {
   const currentYear = new Date().getFullYear();
+  const [supportSocials, setSupportSocials] = useState<SupportSocialsSettings | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getSupportSocials().then((settings) => {
+      if (!cancelled) setSupportSocials(settings);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Live view of the configuration — disabled or invalid entries are never rendered.
+  const configured = supportSocials ?? EMPTY_SUPPORT_SOCIALS;
+  const whatsappUrl = resolveWhatsappUrl(configured);
+  const enabledSocials = configured.socials.filter((s) => s.enabled && isValidUrl(s.url));
+  const hasSupportContent = Boolean(whatsappUrl) || enabledSocials.length > 0;
 
   return (
     <footer className="bg-black py-12 sm:py-16 border-t border-white/10">
@@ -104,53 +131,66 @@ export function Footer({ onNavigateSection, onOpenInfoModal }: FooterProps) {
             </ul>
           </div>
 
-          {/* Support & Social Placeholders */}
-          <div className="md:col-span-3 space-y-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-[#B3B3B3]">
-              Support &amp; Socials
-            </h3>
-
-            <button
-              type="button"
-              onClick={() => onOpenInfoModal('contact')}
-              className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-[#181818] px-4 py-3 text-left transition-colors hover:border-[#1DB954] cursor-pointer"
-            >
-              <MessageCircle className="h-5 w-5 text-[#1DB954] shrink-0" aria-hidden="true" />
-              <div>
-                <p className="text-xs font-medium text-[#B3B3B3]">WhatsApp Support</p>
-                <p className="font-mono text-xs font-semibold text-white">
-                  {BRAND_INFO.supportWhatsappDisplay}
-                </p>
-              </div>
-            </button>
-
-            <div className="flex items-center gap-3 pt-1">
-              <button
-                type="button"
-                onClick={() => onOpenInfoModal('contact')}
-                aria-label="WhatsApp Support Placeholder"
-                className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-[#181818] text-[#B3B3B3] transition-colors hover:border-[#1DB954] hover:text-[#1DB954] cursor-pointer"
-              >
-                <MessageCircle className="h-4 w-4" aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                onClick={() => onOpenInfoModal('contact')}
-                aria-label="Instagram Placeholder"
-                className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-[#181818] text-[#B3B3B3] transition-colors hover:border-[#1DB954] hover:text-[#1DB954] cursor-pointer"
-              >
-                <Instagram className="h-4 w-4" aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                onClick={() => onOpenInfoModal('contact')}
-                aria-label="Social Share Placeholder"
-                className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-[#181818] text-[#B3B3B3] transition-colors hover:border-[#1DB954] hover:text-[#1DB954] cursor-pointer"
-              >
-                <Share2 className="h-4 w-4" aria-hidden="true" />
-              </button>
+          {/* Support & Socials — configured centrally by Super Admin */}
+          {supportSocials === null ? (
+            <div className="md:col-span-3 space-y-4" aria-hidden="true">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-[#B3B3B3]">
+                Support &amp; Socials
+              </h3>
+              <div className="h-[68px] w-full animate-pulse rounded-xl border border-white/10 bg-[#181818]" />
+              <div className="h-10 w-40 animate-pulse rounded-full bg-[#181818]" />
             </div>
-          </div>
+          ) : hasSupportContent ? (
+            <div className="md:col-span-3 space-y-4">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-[#B3B3B3]">
+                Support &amp; Socials
+              </h3>
+
+              {whatsappUrl && (
+                <a
+                  href={whatsappUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Chat with WhatsApp Support"
+                  className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-[#181818] px-4 py-3 text-left transition-colors hover:border-[#1DB954] cursor-pointer"
+                >
+                  <MessageCircle className="h-5 w-5 text-[#1DB954] shrink-0" aria-hidden="true" />
+                  <div>
+                    <p className="text-xs font-medium text-[#B3B3B3]">WhatsApp Support</p>
+                    <p className="font-mono text-xs font-semibold text-white">
+                      {configured.whatsapp.number
+                        ? displayPhone(configured.whatsapp.number)
+                        : 'Chat with support'}
+                    </p>
+                  </div>
+                </a>
+              )}
+
+              {enabledSocials.length > 0 && (
+                <div className="flex flex-wrap items-center gap-3 pt-1">
+                  {enabledSocials.map((social) => {
+                    const label =
+                      social.platform === 'custom'
+                        ? (social.label?.trim() || 'Custom link')
+                        : social.platform.charAt(0).toUpperCase() + social.platform.slice(1);
+                    return (
+                      <a
+                        key={social.id}
+                        href={social.url.trim()}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={label}
+                        title={label}
+                        className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-[#181818] text-[#B3B3B3] transition-colors hover:border-[#1DB954] hover:text-[#1DB954] cursor-pointer"
+                      >
+                        <PlatformIcon platform={social.platform} className="h-4 w-4" />
+                      </a>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ) : null}
         </div>
 
         <div className="mt-10 pt-6 border-t border-white/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-[#B3B3B3]">
