@@ -20,6 +20,7 @@ import {
   RefreshCw,
   Send,
   Settings,
+  ShieldCheck,
   UserCheck,
   UserPlus,
   Users,
@@ -57,6 +58,8 @@ interface ProfileViewProps {
   sponsoredSlots: SponsoredSlot[];
   onBackToPlans: () => void;
   onJoinNewSlot: () => void;
+  onOpenAdminConsole?: () => void;
+  staffAccess?: 'superAdmin' | 'admin' | 'support' | null;
   onTriggerNextPayment: (subscriptionId: string, months: BillingDurationMonths) => void;
   onCancelSubscriptionSlot: (subscriptionId: string) => void;
   onMarkInboxRead: (messageId: string, isRead: boolean) => void;
@@ -110,6 +113,8 @@ export function ProfileView({
   sponsoredSlots,
   onBackToPlans,
   onJoinNewSlot,
+  onOpenAdminConsole,
+  staffAccess,
   onTriggerNextPayment,
   onCancelSubscriptionSlot,
   onMarkInboxRead,
@@ -433,7 +438,7 @@ export function ProfileView({
     setPendingCancelSub(null);
     setSubView('overview');
     setProfileNotice(
-      `Cancelled ${cancelledPlanName} slot${holderSuffix}. You will no longer be billed for future renewals.`
+      `Cancelled ${cancelledPlanName} slot${holderSuffix}. This slot is now marked cancelled. This is not a refund operation.`
     );
   };
 
@@ -1180,8 +1185,8 @@ export function ProfileView({
                   <span>This subscription slot has been cancelled</span>
                 </div>
                 <p className="text-sm text-[#B3B3B3]">
-                  Future payments and automatic renewals are stopped for Ref{' '}
-                  <span className="font-mono text-white">{activeSub.referenceId}</span>. Join a new slot anytime from Available Plans.
+                  Future renewal payments are stopped for Ref{' '}
+                  <span className="font-mono text-white">{activeSub.referenceId}</span>. This is slot cancellation only, not a refund — no money has been returned. Join a new slot anytime from Available Plans.
                 </p>
                 <button
                   type="button"
@@ -1401,6 +1406,19 @@ export function ProfileView({
                 >
                   <Settings className="h-5 w-5" aria-hidden="true" />
                 </button>
+
+                {/* Staff console — hidden destination; visible to signed-in users only */}
+                {onOpenAdminConsole && (
+                  <button
+                    type="button"
+                    onClick={onOpenAdminConsole}
+                    aria-label={staffAccess ? 'Open staff console' : 'Staff console sign in'}
+                    title={staffAccess ? 'Staff Console' : 'Staff Sign In'}
+                    className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/15 bg-[#181818] text-white transition-colors hover:border-[#1DB954] hover:text-[#1DB954] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1DB954] cursor-pointer"
+                  >
+                    <ShieldCheck className="h-5 w-5" aria-hidden="true" />
+                  </button>
+                )}
 
                 <button
                   type="button"

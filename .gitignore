@@ -2,7 +2,10 @@ node_modules/
 build/
 dist/
 coverage/
+functions/lib/
+supabase/.temp/
 .DS_Store
 *.log
 .env*
 !.env.example
+.env.local

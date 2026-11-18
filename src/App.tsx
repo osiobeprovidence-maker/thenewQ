@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AdminView } from './components/AdminView';
+import { AuthModal } from './components/AuthModal';
 import { FaqSection } from './components/FaqSection';
 import { Footer } from './components/Footer';
 import { HeroSection } from './components/HeroSection';
@@ -9,6 +10,9 @@ import { Navbar } from './components/Navbar';
 import { OrderModal } from './components/OrderModal';
 import { PlansSection } from './components/PlansSection';
 import { ProfileView } from './components/ProfileView';
+import { useAuth } from './context/AuthContext';
+import { fetchLiveSubscriptionPlans } from './lib/subscriptionService';
+import { startBachsCheckout, fetchReservationStatus, cancelMyMembership } from './lib/paymentProvider';
 import {
   BILLING_DURATIONS,
   BRAND_INFO,
@@ -120,11 +124,19 @@ function buildAdminInboxMessage({
 }
 
 export default function App() {
+  const { currentUser, profile: authProfile, isAdmin, isSuperAdmin, isSupport } = useAuth();
   const [currentView, setCurrentView] = useState<AppView>('landing');
-  const [portalRole, setPortalRole] = useState<PortalRole | null>(null);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
   const [supportPermissions, setSupportPermissions] = useState<SupportPermissions>(
     DEFAULT_SUPPORT_PERMISSIONS
   );
+  const staffAccess: 'superAdmin' | 'admin' | 'support' | null = isSuperAdmin
+    ? 'superAdmin'
+    : isAdmin
+      ? 'admin'
+      : isSupport
+        ? 'support'
+        : null;
   const [plans, setPlans] = useState<SubscriptionPlan[]>(SUBSCRIPTION_PLANS);
   const [groups, setGroups] = useState<SubscriptionGroup[]>(INITIAL_SUBSCRIPTION_GROUPS);
   const [platformTransactions, setPlatformTransactions] = useState<PlatformTransaction[]>(
@@ -135,6 +147,8 @@ export default function App() {
   const [formData, setFormData] = useState<OrderFormData>(INITIAL_FORM_DATA);
   const [completedOrder, setCompletedOrder] = useState<CompletedOrder | null>(null);
   const [infoModalType, setInfoModalType] = useState<InfoModalType>(null);
+  const [isCheckoutPending, setIsCheckoutPending] = useState(false);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
   // User Profile & Session Ledger State
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -143,6 +157,59 @@ export default function App() {
   const [paymentHistory, setPaymentHistory] = useState<PaymentRecord[]>([]);
   const [invitedPeople, setInvitedPeople] = useState<InvitedPerson[]>([]);
   const [sponsoredSlots, setSponsoredSlots] = useState<SponsoredSlot[]>([]);
+
+  // Track which subscription plans came from a successful live Supabase fetch.
+  // A plan is only “live” if the backend supplied it and its id is a UUID.
+  const [livePlanIds, setLivePlanIds] = useState<Set<string>>(new Set());
+
+  // Synchronize live subscription plans from Supabase
+  useEffect(() => {
+    let mounted = true;
+    fetchLiveSubscriptionPlans().then((livePlans) => {
+      if (mounted && livePlans.length > 0) {
+        setPlans(livePlans);
+        setLivePlanIds(new Set(livePlans.map((p) => p.id)));
+      }
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // Synchronize authenticated user profile
+  useEffect(() => {
+    if (currentUser) {
+      setUserProfile({
+        fullName: authProfile?.display_name || currentUser.displayName || 'Member',
+        email: currentUser.email || '',
+        whatsappNumber: authProfile?.phone || currentUser.phoneNumber || '',
+        joinedAt: currentUser.metadata.creationTime || new Date().toISOString(),
+        inviteCode: `INV-${currentUser.uid.slice(0, 6).toUpperCase()}`,
+      });
+    }
+  }, [currentUser, authProfile]);
+
+  // Live checkout only runs when:
+  //   - demo mode is not forced (VITE_DEMO_MODE), and
+  //   - Firebase auth produced a signed-in user, and
+  //   - the selected plan came from a successful live Supabase fetch, and
+  //   - its id is a UUID (never a bundled local seed slug).
+  // Anything else falls back to clearly-labelled demo mode — never to a
+  // phantom "successful" checkout.
+  const chosenPlanForCheckout = plans.find((p) => p.id === formData.planId);
+  const chosenPlanIsLive =
+    chosenPlanForCheckout != null && livePlanIds.has(chosenPlanForCheckout.id);
+  const isLivePlanId =
+    chosenPlanForCheckout != null &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      chosenPlanForCheckout.id
+    );
+  const checkoutMode: 'live' | 'demo' =
+    import.meta.env.VITE_DEMO_MODE === 'true'
+      ? 'demo'
+      : currentUser && chosenPlanIsLive && isLivePlanId
+        ? 'live'
+        : 'demo';
 
   const navigateToSection = (sectionId: string) => {
     if (currentView !== 'landing') {
@@ -260,7 +327,8 @@ export default function App() {
     );
   };
 
-  const handleConfirmOrder = () => {
+  // Locals-only order handler — used in demo mode where no real backend exists.
+  const handleConfirmOrderLocal = () => {
     const chosenPlan = plans.find((p) => p.id === formData.planId) ?? plans[0];
     const nowIso = new Date().toISOString();
     const referenceId = generateReferenceId('JTQ');
@@ -389,6 +457,92 @@ export default function App() {
     setOrderStep('success');
   };
 
+  // Dispatch: real checkout (live mode) hooks up to Bachs via the backend callable.
+  // Demo mode keeps the pre-wired local flow.
+  const handleConfirmOrder = () => {
+    if (checkoutMode === 'demo') {
+      handleConfirmOrderLocal();
+      return;
+    }
+
+    setIsCheckoutPending(true);
+    setCheckoutError(null);
+
+    const plan = plans.find((p) => p.id === formData.planId);
+    if (!plan) {
+      setIsCheckoutPending(false);
+      setCheckoutError('Could not resolve the selected subscription plan.');
+      return;
+    }
+
+    startBachsCheckout({
+      productId: plan.id,
+      beneficiaryUserId: currentUser?.uid,
+      preferredGroupCode: formData.groupCode?.trim().toUpperCase() || undefined,
+      successUrl: `${window.location.origin}/?payment-ref=PENDING`,
+      customerEmail: formData.email.trim(),
+      customerName: formData.fullName.trim(),
+    })
+      .then((result) => {
+        if (!result.ok || !result.checkoutUrl) {
+          setIsCheckoutPending(false);
+          setCheckoutError(result.ok ? 'Malformed response from payment server.' : result.error);
+          return;
+        }
+        // Redirect to sandbox checkout page — payment confirmed via webhook, then the
+        // reservation flips to `fulfilled` and the Profile inbox + subscriptions update.
+        window.location.assign(result.checkoutUrl);
+      })
+      .catch((error) => {
+        console.error('[App] checkout failed:', error);
+        setIsCheckoutPending(false);
+        setCheckoutError('Could not start checkout. Please try again.');
+      });
+  };
+
+  // Return path: when Bachs redirects the browser back with ?payment-ref=…, poll the reservation.
+  // fetchReservationStatus reads via the caller's anon Supabase client, so RLS enforces ownership — the URL alone proves nothing.
+  useEffect(() => {
+    const ref = new URLSearchParams(window.location.search).get('payment-ref');
+    if (!ref || !currentUser) return;
+    setOrderModalOpen(true);
+    setOrderStep('awaiting-payment');
+    const started = Date.now();
+    const id = window.setInterval(() => {
+      fetchReservationStatus(ref).then((s) => {
+        if (s.status === 'fulfilled') {
+          window.clearInterval(id);
+          window.history.replaceState({}, '', window.location.pathname);
+          setOrderStep('success');
+          setCompletedOrder({
+            referenceId: ref,
+            fullName: formData.fullName.trim(),
+            email: formData.email.trim(),
+            whatsappNumber: formData.whatsappNumber.trim(),
+            plan: plans.find((p) => p.id === formData.planId) ?? plans[0],
+            totalFormatted: formatPlanPrice(plans.find((p) => p.id === formData.planId) ?? plans[0]),
+            createdAt: new Date().toISOString(),
+          });
+        } else if (s.status === 'expired' || s.status === 'failed') {
+          window.clearInterval(id);
+          setCheckoutError(
+            s.status === 'expired'
+              ? 'Your reservation expired before payment completed.'
+              : 'Payment failed or was cancelled. Please try again.'
+          );
+          setOrderStep('checkout');
+        } else if (Date.now() - started > 90_000) {
+          window.clearInterval(id);
+          setCheckoutError('We could not confirm payment yet. Check your payment history in a few minutes.');
+          setOrderStep('checkout');
+        }
+      });
+    }, 3000);
+    return () => window.clearInterval(id);
+    // Only run on mount / user change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser]);
+
   const handleDoneToProfile = () => {
     setOrderModalOpen(false);
     openProfileView();
@@ -483,6 +637,14 @@ export default function App() {
   const handleCancelSubscriptionSlot = (subscriptionId: string) => {
     const targetSub = activeSubscriptions.find((s) => s.id === subscriptionId);
     if (!targetSub || targetSub.status === 'cancelled') return;
+
+    // In live checkout mode, persist the cancellation before flipping UI state.
+    // In live checkout mode, persist the cancellation before flipping UI state.
+    if (checkoutMode === 'live') {
+      cancelMyMembership({ referenceId: targetSub.referenceId }).catch((err) => {
+        console.error('[App] cancelMyMembership failed:', err);
+      });
+    }
 
     const cancelledAt = new Date().toISOString();
     setActiveSubscriptions((prev) =>
@@ -1006,8 +1168,8 @@ export default function App() {
         hasProfile={Boolean(userProfile)}
         onNavigateSection={navigateToSection}
         onOpenProfile={openProfileView}
-        onOpenAdmin={openAdminView}
         onJoinNow={handleJoinNowFromNav}
+        onOpenAuthModal={() => setAuthModalOpen(true)}
       />
 
       <main className="flex-1">
@@ -1042,6 +1204,8 @@ export default function App() {
             sponsoredSlots={sponsoredSlots}
             onBackToPlans={() => navigateToSection('plans')}
             onJoinNewSlot={handleJoinNowFromNav}
+            onOpenAdminConsole={currentUser ? openAdminView : undefined}
+            staffAccess={staffAccess}
             onTriggerNextPayment={handleTriggerNextPayment}
             onCancelSubscriptionSlot={handleCancelSubscriptionSlot}
             onMarkInboxRead={handleMarkInboxRead}
@@ -1053,14 +1217,12 @@ export default function App() {
 
         {currentView === 'admin' && (
           <AdminView
-            portalRole={portalRole}
             plans={plans}
             groups={groups}
             transactions={platformTransactions}
             supportPermissions={supportPermissions}
-            onLogin={(role) => setPortalRole(role)}
-            onLogout={() => setPortalRole(null)}
             onBackToSite={() => navigateToSection('home')}
+            onRequestSignIn={() => setAuthModalOpen(true)}
             onUpdateSupportPermissions={setSupportPermissions}
             onCreateGroup={handleCreateGroup}
             onUpdateGroupDetails={handleUpdateGroupDetails}
@@ -1079,7 +1241,6 @@ export default function App() {
       <Footer
         onNavigateSection={navigateToSection}
         onOpenInfoModal={(type) => setInfoModalType(type)}
-        onOpenAdmin={openAdminView}
       />
 
       <OrderModal
@@ -1096,9 +1257,21 @@ export default function App() {
         onConfirmOrder={handleConfirmOrder}
         onStartNewOrder={handleStartNewOrder}
         onDoneToProfile={handleDoneToProfile}
+        checkoutMode={checkoutMode}
+        isCheckoutPending={isCheckoutPending}
+        checkoutError={checkoutError}
       />
 
       <InfoModal modalType={infoModalType} onClose={() => setInfoModalType(null)} />
+
+      <AuthModal
+        isOpen={authModalOpen}
+        onClose={() => setAuthModalOpen(false)}
+        onSuccess={() => {
+          setAuthModalOpen(false);
+          openProfileView();
+        }}
+      />
     </div>
   );
 }

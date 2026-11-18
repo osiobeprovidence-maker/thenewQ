@@ -31,6 +31,9 @@ interface OrderModalProps {
   onConfirmOrder: () => void;
   onStartNewOrder: () => void;
   onDoneToProfile: () => void;
+  checkoutMode: 'live' | 'demo';
+  isCheckoutPending: boolean;
+  checkoutError: string | null;
 }
 
 function validateForm(data: OrderFormData, groups: SubscriptionGroup[]): FormErrors {
@@ -98,16 +101,17 @@ export function OrderModal({
   onConfirmOrder,
   onStartNewOrder,
   onDoneToProfile,
+  checkoutMode,
+  isCheckoutPending,
+  checkoutError,
 }: OrderModalProps) {
   const [errors, setErrors] = useState<FormErrors>({});
-  const [isSimulatingConfirm, setIsSimulatingConfirm] = useState(false);
 
   const selectedPlan = plans.find((p) => p.id === formData.planId) ?? plans[0];
   const isWaitlistPlan = selectedPlan.status === 'waitlist';
 
   useEffect(() => {
     setErrors({});
-    setIsSimulatingConfirm(false);
   }, [isOpen, step]);
 
   useEffect(() => {
@@ -138,16 +142,17 @@ export function OrderModal({
     onProceedToCheckout();
   };
 
-  const handleSimulatedConfirm = () => {
-    if (isSimulatingConfirm) return;
-    setIsSimulatingConfirm(true);
-    window.setTimeout(() => {
-      setIsSimulatingConfirm(false);
-      onConfirmOrder();
-    }, 450);
+  const handleConfirm = () => {
+    if (isCheckoutPending) return;
+    onConfirmOrder();
   };
 
-  const stepIndex = step === 'form' ? 1 : step === 'checkout' ? 2 : 3;
+  const stepIndex =
+    step === 'form' ? 1
+    : step === 'checkout' ? 2
+    : step === 'awaiting-payment' ? 3
+    : checkoutMode === 'live' ? 4
+    : 3;
 
   return (
     <div
@@ -166,12 +171,13 @@ export function OrderModal({
         <div className="flex items-center justify-between gap-4 pb-4 border-b border-white/10">
           <div className="flex items-center gap-3 text-xs font-semibold">
             <span className="text-[#1DB954] font-mono tabular-nums">
-              Step {stepIndex} of 3
+              Step {stepIndex} of {checkoutMode === 'live' ? 4 : 3}
             </span>
             <span aria-hidden="true" className="text-white/25">·</span>
             <span className="text-[#B3B3B3]">
               {step === 'form' && 'Register Details'}
-              {step === 'checkout' && 'Simulated Checkout'}
+              {step === 'checkout' && (checkoutMode === 'live' ? 'Checkout' : 'Demo Checkout')}
+              {step === 'awaiting-payment' && 'Awaiting Payment'}
               {step === 'success' && 'Order Confirmed'}
             </span>
           </div>
@@ -395,7 +401,7 @@ export function OrderModal({
           </form>
         )}
 
-        {/* STEP 2: SIMULATED CHECKOUT SCREEN */}
+        {/* STEP 2: CHECKOUT SCREEN */}
         {step === 'checkout' && (
           <div className="mt-5 space-y-5">
             <div>
@@ -403,17 +409,25 @@ export function OrderModal({
                 Checkout Summary
               </h2>
               <p className="mt-1 text-sm text-[#B3B3B3]">
-                Review your details before confirming your simulated slot order.
+                Review your details before {checkoutMode === 'live' ? 'paying' : 'confirming'} your slot order.
               </p>
             </div>
 
-            {/* Honest Frontend Simulation Notice */}
-            <div className="flex items-start gap-3 rounded-xl border border-[#1DB954]/30 bg-[#121212] px-4 py-3 text-xs text-[#B3B3B3]">
-              <CreditCard className="h-4 w-4 text-[#1DB954] shrink-0 mt-0.5" aria-hidden="true" />
-              <p className="leading-relaxed">
-                Frontend Checkout Preview: No real payment is collected or charged during this demonstration.
-              </p>
-            </div>
+            {checkoutMode === 'demo' ? (
+              <div className="flex items-start gap-3 rounded-xl border border-[#1DB954]/30 bg-[#121212] px-4 py-3 text-xs text-[#B3B3B3]">
+                <CreditCard className="h-4 w-4 text-[#1DB954] shrink-0 mt-0.5" aria-hidden="true" />
+                <p className="leading-relaxed">
+                  Demo checkout — this catalogue entry is not connected to the live payment processor in this environment. No charge is made.
+                </p>
+              </div>
+            ) : (
+              <div className="flex items-start gap-3 rounded-xl border border-[#1DB954]/30 bg-[#121212] px-4 py-3 text-xs text-[#B3B3B3]">
+                <CreditCard className="h-4 w-4 text-[#1DB954] shrink-0 mt-0.5" aria-hidden="true" />
+                <p className="leading-relaxed">
+                  Secure checkout — you will be redirected to Bachs&apos; sandbox checkout page to complete payment. No money moves until payment is verified server-side.
+                </p>
+              </div>
+            )}
 
             {/* Order Summary Breakdown */}
             <div className="rounded-xl border border-white/10 bg-[#121212] p-4 sm:p-5 space-y-3.5">
@@ -473,12 +487,18 @@ export function OrderModal({
               </div>
             </div>
 
+            {checkoutError && (
+              <p className="rounded-xl border border-red-500/35 bg-red-950/40 p-3 text-xs text-red-300" role="alert">
+                {checkoutError}
+              </p>
+            )}
+
             {/* Actions */}
             <div className="flex flex-col-reverse sm:flex-row items-center gap-3 pt-1">
               <button
                 type="button"
                 onClick={onBackToForm}
-                disabled={isSimulatingConfirm}
+                disabled={isCheckoutPending}
                 className="w-full sm:w-auto inline-flex items-center justify-center gap-2 min-h-[48px] rounded-full border border-white/20 bg-[#121212] px-5 py-3 text-sm font-semibold text-white transition-colors hover:border-white/40 hover:bg-black cursor-pointer disabled:opacity-50"
               >
                 <ArrowLeft className="h-4 w-4" aria-hidden="true" />
@@ -487,20 +507,56 @@ export function OrderModal({
 
               <button
                 type="button"
-                onClick={handleSimulatedConfirm}
-                disabled={isSimulatingConfirm}
+                onClick={handleConfirm}
+                disabled={isCheckoutPending}
                 className="w-full sm:flex-1 inline-flex items-center justify-center gap-2 min-h-[48px] rounded-full bg-[#1DB954] px-6 py-3.5 text-sm sm:text-base font-bold text-black transition-all duration-150 hover:bg-[#15803D] hover:text-white active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1DB954] cursor-pointer disabled:opacity-80"
               >
-                {isSimulatingConfirm ? (
+                {isCheckoutPending ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                    <span>Preparing Summary...</span>
+                    <span>{checkoutMode === 'live' ? 'Opening secure checkout…' : 'Preparing summary…'}</span>
                   </>
                 ) : (
-                  <span>Confirm Order</span>
+                  <span>{checkoutMode === 'live' ? 'Pay with Bachs (sandbox)' : 'Confirm Order'}</span>
                 )}
               </button>
             </div>
+          </div>
+        )}
+
+        {/* STEP 3: AWAITING PAYMENT SCREEN */}
+        {step === 'awaiting-payment' && (
+          <div className="mt-5 space-y-5 text-center">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-[#1DB954]/40 bg-[#1DB954]/10 text-[#1DB954]">
+              <Loader2 className="h-8 w-8 animate-spin" aria-hidden="true" />
+            </div>
+
+            <div>
+              <h2 id="order-modal-title" className="mt-1 text-2xl font-extrabold text-white tracking-tight">
+                Waiting for Payment
+              </h2>
+              <p className="mt-2 text-sm text-[#B3B3B3] leading-relaxed">
+                Your reservation is created. Complete the payment in the checkout tab — your subscription activates automatically once payment is verified server-side.
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-[#121212] p-4 text-left text-xs text-[#B3B3B3] space-y-2">
+              <p>
+                Do not close this window until your slot is confirmed in your{' '}
+                <span className="text-white font-semibold">Profile → Subscriptions</span>.
+              </p>
+              <p>
+                If you completed payment but do not see activation within a few minutes, contact support with your order reference.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={onBackToForm}
+              className="w-full min-h-[46px] rounded-full border border-white/20 bg-[#121212] px-5 py-3 text-sm font-semibold text-white transition-colors hover:border-white/40 hover:bg-black cursor-pointer"
+            >
+              Back (reservation stays pending — complete payment to confirm your slot)
+            </button>
           </div>
         )}
 

@@ -6,10 +6,9 @@ import { BrandLogo } from './BrandLogo';
 interface FooterProps {
   onNavigateSection: (sectionId: string) => void;
   onOpenInfoModal: (type: Exclude<InfoModalType, null>) => void;
-  onOpenAdmin: () => void;
 }
 
-export function Footer({ onNavigateSection, onOpenInfoModal, onOpenAdmin }: FooterProps) {
+export function Footer({ onNavigateSection, onOpenInfoModal }: FooterProps) {
   const currentYear = new Date().getFullYear();
 
   return (
@@ -100,15 +99,6 @@ export function Footer({ onNavigateSection, onOpenInfoModal, onOpenAdmin }: Foot
                   className="text-[#B3B3B3] hover:text-white transition-colors cursor-pointer text-left"
                 >
                   Terms &amp; Conditions
-                </button>
-              </li>
-              <li>
-                <button
-                  type="button"
-                  onClick={onOpenAdmin}
-                  className="text-[#1DB954] hover:text-white transition-colors cursor-pointer text-left font-medium"
-                >
-                  Admin Portal
                 </button>
               </li>
             </ul>

@@ -1,0 +1,32 @@
+// JOIN THE QUEUE — Production Firestore rules
+// Server-owned collections: processed_webhook_events, admin_audit_log, slot_reservations.
+// Clients have no access to server-owned data beyond the documented RLS surface.
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Processed webhook events: only Cloud Functions (Admin SDK) may write, never a client.
+    match /processed_webhook_events/{eventId} {
+      allow read, write: if false;
+    }
+
+    // Admin audit log: only Cloud Functions (Admin SDK) may write; no client may read.
+    match /admin_audit_log/{entry} {
+      allow read, write: if false;
+    }
+
+    // Slot reservations:
+    // A signed-in user may fetch their own reservation (uid match).
+    // No list, create, update or delete is allowed on the client.
+    match /slot_reservations/{reservationId} {
+      allow get: if request.auth != null && request.auth.uid == resource.data.payerUserId;
+      allow write, list: if false;
+    }
+
+    // Default-deny everything else.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import {
   ArrowLeft,
   Banknote,
@@ -11,6 +11,7 @@ import {
   FolderPlus,
   Hash,
   Headphones,
+  History,
   Layers,
   LogOut,
   Mail,
@@ -33,6 +34,16 @@ import {
   formatDisplayDate,
   formatPlanPrice,
 } from '../data/subscriptions';
+import { useAuth } from '../context/AuthContext';
+import { callAdminFunction } from '../lib/firebaseClaims.js';
+
+/** Strips noisy Firebase prefixes so callable errors read naturally in the UI. */
+function friendlyCallableError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error ?? '');
+  const cleaned = raw.replace(/^Firebase:\s*Error\s*\([^)]*\):\s*/i, '').trim();
+  return cleaned || 'The request could not be completed. Please try again.';
+}
+
 import type {
   GroupMember,
   GroupMemberPaymentStatus,
@@ -45,14 +56,12 @@ import type {
 } from '../types/subscription';
 
 interface AdminViewProps {
-  portalRole: PortalRole | null;
   plans: SubscriptionPlan[];
   groups: SubscriptionGroup[];
   transactions: PlatformTransaction[];
   supportPermissions: SupportPermissions;
-  onLogin: (role: PortalRole) => void;
-  onLogout: () => void;
   onBackToSite: () => void;
+  onRequestSignIn: () => void;
   onUpdateSupportPermissions: (updater: (prev: SupportPermissions) => SupportPermissions) => void;
   onCreateGroup: (payload: {
     groupName: string;
@@ -91,14 +100,12 @@ type AdminTab = 'groups' | 'subscriptions' | 'financials' | 'settings';
 type TransactionFilter = 'all' | 'users' | 'support';
 
 export function AdminView({
-  portalRole,
   plans,
   groups,
   transactions,
   supportPermissions,
-  onLogin,
-  onLogout,
   onBackToSite,
+  onRequestSignIn,
   onUpdateSupportPermissions,
   onCreateGroup,
   onUpdateGroupDetails,
@@ -111,8 +118,23 @@ export function AdminView({
   onAddPlan,
   onTogglePlanStatus,
 }: AdminViewProps) {
-  // Login state
-  const [loginRoleChoice, setLoginRoleChoice] = useState<PortalRole>('admin');
+  // Login state (claims come from backend-issued Firebase custom claims)
+  const {
+    currentUser,
+    loading: authLoading,
+    isAdmin: hasAdminClaim,
+    isSuperAdmin,
+    isSupport: hasSupportClaim,
+    logout,
+    refreshClaims,
+  } = useAuth();
+  const [inviteRedeemState, setInviteRedeemState] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [inviteRedeemMessage, setInviteRedeemMessage] = useState<string | null>(null);
+
+  // Effective role: superAdmin implies admin; support is support-only.
+  const isAdmin = isSuperAdmin || hasAdminClaim;
+  const isSupport = !isAdmin && hasSupportClaim;
+  const portalRole: PortalRole | null = isAdmin ? 'admin' : isSupport ? 'support' : null;
 
   // Dashboard navigation & selection state
   const [activeTab, setActiveTab] = useState<AdminTab>('groups');
@@ -154,9 +176,6 @@ export function AdminView({
   const [planSlots, setPlanSlots] = useState('6');
   const [planInitialStatus, setPlanInitialStatus] = useState<PlanStatus>('available');
   const [planFormError, setPlanFormError] = useState<string | null>(null);
-
-  const isAdmin = portalRole === 'admin';
-  const isSupport = portalRole === 'support';
 
   // Ensure support users always land on groups tab
   useEffect(() => {
@@ -242,12 +261,6 @@ export function AdminView({
     }
     setCopiedCodeGroupId(groupId);
     window.setTimeout(() => setCopiedCodeGroupId(null), 2000);
-  };
-
-  const handlePreviewRole = (role: PortalRole) => {
-    setLoginRoleChoice(role);
-    setActiveTab('groups');
-    onLogin(role);
   };
 
   const handleCreateGroupSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -439,7 +452,42 @@ export function AdminView({
     return true;
   });
 
-  // PORTAL LOGIN SCREEN (Admin OR Customer Care / Support)
+  // ---- Access gate: only backend-issued Firebase custom claims unlock staff views ----
+  const handleRedeemInvitation = async () => {
+    setInviteRedeemState('loading');
+    setInviteRedeemMessage(null);
+    try {
+      await callAdminFunction('redeemAdminInvitation', {});
+      await refreshClaims();
+      // Claims now flow through context; the gate below opens automatically.
+      setInviteRedeemState('idle');
+      setInviteRedeemMessage(null);
+    } catch (e) {
+      setInviteRedeemState('error');
+      setInviteRedeemMessage(friendlyCallableError(e));
+    }
+  };
+
+  // Waiting for Firebase to report auth state — show a neutral skeleton, never data.
+  if (authLoading) {
+    return (
+      <section className="bg-black py-14 sm:py-24 min-h-[75vh] flex items-center">
+        <div className="mx-auto w-full max-w-md px-4 sm:px-6">
+          <div
+            role="status"
+            aria-label="Checking staff access"
+            className="rounded-2xl border border-white/10 bg-[#181818] p-6 sm:p-8 space-y-4 animate-pulse"
+          >
+            <div className="h-12 w-12 rounded-xl bg-white/10" />
+            <div className="h-4 w-40 rounded bg-white/10" />
+            <div className="h-3 w-64 rounded bg-white/10" />
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  // Access denied: unauthenticated users, or authenticated users without a staff claim.
   if (!portalRole) {
     return (
       <section className="bg-black py-14 sm:py-24 min-h-[75vh] flex items-center">
@@ -456,78 +504,94 @@ export function AdminView({
           <div className="rounded-2xl border border-white/10 bg-[#181818] p-6 sm:p-8 shadow-2xl space-y-6">
             <div className="flex items-center gap-3.5 pb-5 border-b border-white/10">
               <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-[#1DB954]/35 bg-[#1DB954]/10 text-[#1DB954] shrink-0">
-                {loginRoleChoice === 'admin' ? (
-                  <Shield className="h-6 w-6" aria-hidden="true" />
-                ) : (
-                  <Headphones className="h-6 w-6" aria-hidden="true" />
-                )}
+                <Shield className="h-6 w-6" aria-hidden="true" />
               </div>
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wider text-[#1DB954]">
-                  Operations Portal
+                  Queue Operations Portal
                 </p>
                 <h1 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight">
-                  Preview as {loginRoleChoice === 'admin' ? 'Admin' : 'Customer Care'}
+                  Staff Access Restricted
                 </h1>
               </div>
             </div>
 
-            {/* Role Toggle */}
-            <div
-              role="tablist"
-              aria-label="Choose portal role"
-              className="grid grid-cols-2 gap-1.5 rounded-xl border border-white/10 bg-[#121212] p-1"
-            >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={loginRoleChoice === 'admin'}
-                onClick={() => setLoginRoleChoice('admin')}
-                className={`inline-flex items-center justify-center gap-1.5 rounded-lg py-2.5 text-xs font-bold transition-colors cursor-pointer ${
-                  loginRoleChoice === 'admin'
-                    ? 'bg-[#1DB954] text-black'
-                    : 'text-[#B3B3B3] hover:text-white'
-                }`}
-              >
-                <Shield className="h-3.5 w-3.5" aria-hidden="true" />
-                <span>Admin</span>
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={loginRoleChoice === 'support'}
-                onClick={() => setLoginRoleChoice('support')}
-                className={`inline-flex items-center justify-center gap-1.5 rounded-lg py-2.5 text-xs font-bold transition-colors cursor-pointer ${
-                  loginRoleChoice === 'support'
-                    ? 'bg-[#1DB954] text-black'
-                    : 'text-[#B3B3B3] hover:text-white'
-                }`}
-              >
-                <Headphones className="h-3.5 w-3.5" aria-hidden="true" />
-                <span>Customer Care</span>
-              </button>
-            </div>
+            {currentUser ? (
+              <div className="space-y-4">
+                <div className="rounded-xl border border-white/10 bg-[#121212] p-4 text-xs space-y-1.5">
+                  <p className="text-[#B3B3B3]">
+                    Signed in as: <strong className="text-white">{currentUser.email}</strong>
+                  </p>
+                  <p className="text-amber-400 font-medium">
+                    This account does not hold staff privileges (superAdmin, admin, or support).
+                  </p>
+                </div>
 
-            <p className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-4 text-xs leading-relaxed text-[#B3B3B3]">
-              This is a local demo preview, not a protected sign-in. There is no backend,
-              authentication, or data persistence.
-            </p>
-            <div className="space-y-3">
-              <button
-                type="button"
-                onClick={() => handlePreviewRole(loginRoleChoice)}
-                className="w-full inline-flex items-center justify-center gap-2 min-h-[48px] rounded-full bg-[#1DB954] px-6 py-3 text-sm font-bold text-black transition-colors hover:bg-[#15803D] hover:text-white cursor-pointer"
-              >
-                {loginRoleChoice === 'admin' ? (
-                  <Shield className="h-4 w-4" aria-hidden="true" />
-                ) : (
-                  <Headphones className="h-4 w-4" aria-hidden="true" />
+                <p className="text-xs text-[#B3B3B3] leading-relaxed">
+                  Administrative access is granted by invitation only. If you were invited to the
+                  operations team, redeem your invitation below — the platform assigns the role to
+                  your verified Google identity.
+                </p>
+
+                {inviteRedeemMessage && (
+                  <p className="rounded-xl border border-red-500/30 bg-red-950/40 p-3 text-xs text-red-300" role="alert">
+                    {inviteRedeemMessage}
+                  </p>
                 )}
-                <span>
-                  Preview as {loginRoleChoice === 'admin' ? 'Admin' : 'Customer Care'}
-                </span>
-              </button>
-            </div>
+
+                <button
+                  type="button"
+                  onClick={handleRedeemInvitation}
+                  disabled={inviteRedeemState === 'loading'}
+                  className="w-full inline-flex items-center justify-center gap-2 min-h-[46px] rounded-full bg-[#1DB954] px-6 py-3 text-sm font-bold text-black transition-colors hover:bg-[#15803D] hover:text-white cursor-pointer disabled:opacity-70"
+                >
+                  {inviteRedeemState === 'loading' ? 'Checking invitation…' : 'Redeem Staff Invitation'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    void logout();
+                    onRequestSignIn();
+                  }}
+                  className="w-full min-h-[44px] rounded-full border border-white/20 bg-white/5 px-6 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-white/10 cursor-pointer"
+                >
+                  Sign in with a different account
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <p className="text-xs text-[#B3B3B3] leading-relaxed">
+                  This area is restricted to authorized operations staff. Sign in with your staff
+                  Google account to continue.
+                </p>
+                <button
+                  type="button"
+                  onClick={onRequestSignIn}
+                  className="w-full flex items-center justify-center gap-3 min-h-[48px] rounded-full border border-white/20 bg-white/5 py-3 px-4 text-sm font-semibold text-white hover:bg-white/10 transition-colors cursor-pointer"
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 24 24">
+                    <path
+                      fill="#4285F4"
+                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                    />
+                    <path
+                      fill="#34A853"
+                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                    />
+                    <path
+                      fill="#FBBC05"
+                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                    />
+                    <path
+                      fill="#EA4335"
+                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                    />
+                  </svg>
+                  Sign in with Google
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </section>
@@ -636,7 +700,9 @@ export function AdminView({
 
               <button
                 type="button"
-                onClick={onLogout}
+                onClick={() => {
+                  void logout();
+                }}
                 className="inline-flex items-center gap-1.5 min-h-[40px] rounded-full border border-white/15 bg-[#181818] px-4 py-2 text-xs font-semibold text-[#B3B3B3] hover:border-white/35 hover:text-white transition-colors cursor-pointer whitespace-nowrap"
               >
                 <LogOut className="h-3.5 w-3.5" aria-hidden="true" />
@@ -2029,35 +2095,10 @@ export function AdminView({
               </div>
             </div>
 
-            {/* Right Column: Support Preview */}
+            {/* Right Column: Team Access (Super Admin) + Administrative Audit Log */}
             <div className="lg:col-span-4 space-y-4">
-              <div className="rounded-2xl border border-white/10 bg-[#181818] p-5 sm:p-6 space-y-4">
-                <div className="flex items-center gap-3 pb-3 border-b border-white/10">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#1DB954]/30 bg-[#1DB954]/10 text-[#1DB954]">
-                    <Headphones className="h-5 w-5" aria-hidden="true" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-bold text-white">Customer Care Preview</h3>
-                    <p className="text-xs text-[#B3B3B3]">Local demo role switch</p>
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-white/10 bg-[#121212] p-4 text-xs leading-relaxed text-[#B3B3B3]">
-                  This preview is not authentication and must not be used to protect real data.
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    onLogin('support');
-                    setActiveTab('groups');
-                  }}
-                  className="w-full inline-flex items-center justify-center gap-2 min-h-[44px] rounded-full bg-[#1DB954] px-5 py-2.5 text-xs font-bold text-black hover:bg-[#15803D] hover:text-white transition-colors cursor-pointer"
-                >
-                  <Headphones className="h-4 w-4" aria-hidden="true" />
-                  <span>Preview as Customer Care</span>
-                </button>
-              </div>
+              {isSuperAdmin && <SuperAdminTeamPanel currentUid={currentUser?.uid ?? ''} />}
+              {(isSuperAdmin || isAdmin) && <AdminAuditLogPanel />}
             </div>
           </div>
         )}
@@ -2291,3 +2332,462 @@ export function AdminView({
     </section>
   );
 }
+
+// ============================================================================
+// SUPER ADMIN — Team Access panel (invite, list, and revoke staff roles)
+// ============================================================================
+
+interface StaffUser {
+  uid: string;
+  email: string | null;
+  disabled: boolean;
+  superAdmin: boolean;
+  admin: boolean;
+  support: boolean;
+}
+
+interface AdminInvitation {
+  invitationId: string;
+  email: string;
+  role: 'admin' | 'support';
+  note: string | null;
+  status: 'pending' | 'accepted' | 'revoked' | 'expired';
+  code: string | null;
+  invitedByEmail: string | null;
+  createdAt: number | null;
+  expiresAt: number | null;
+  acceptedAt: number | null;
+}
+
+const INVITE_STATUS_CLASSES: Record<string, string> = {
+  pending: 'text-amber-400',
+  accepted: 'text-[#1DB954]',
+  revoked: 'text-red-400',
+  expired: 'text-[#B3B3B3]',
+};
+
+function formatAuditTimestamp(ms: number | null): string {
+  if (!ms) return '—';
+  return new Date(ms).toLocaleString('en-NG', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function SuperAdminTeamPanel({ currentUid }: { currentUid: string }) {
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<'admin' | 'support'>('support');
+  const [inviteNote, setInviteNote] = useState('');
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [createdInvite, setCreatedInvite] = useState<(AdminInvitation & { reused?: boolean }) | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
+  const [inviteCopied, setInviteCopied] = useState(false);
+
+  const [staff, setStaff] = useState<StaffUser[]>([]);
+  const [invitations, setInvitations] = useState<AdminInvitation[]>([]);
+  const [listsLoading, setListsLoading] = useState(true);
+  const [listsError, setListsError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [confirmingRevokeId, setConfirmingRevokeId] = useState<string | null>(null);
+
+  const loadAll = useCallback(async () => {
+    setListsLoading(true);
+    setListsError(null);
+    const [staffRes, invitationsRes] = await Promise.allSettled([
+      callAdminFunction('listStaffUsers', {}),
+      callAdminFunction('listAdminInvitations', {}),
+    ]);
+    if (staffRes.status === 'fulfilled') {
+      setStaff((((staffRes.value.data as any)?.staff) as StaffUser[]) ?? []);
+    } else {
+      setListsError(friendlyCallableError(staffRes.reason));
+    }
+    if (invitationsRes.status === 'fulfilled') {
+      setInvitations((((invitationsRes.value.data as any)?.invitations) as AdminInvitation[]) ?? []);
+    } else {
+      setListsError(friendlyCallableError(invitationsRes.reason));
+    }
+    setListsLoading(false);
+  }, []);
+
+  useEffect(() => {
+    void loadAll();
+  }, [loadAll]);
+
+  const handleCreateInvitation = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setInviteError(null);
+    setIsCreating(true);
+    void (async () => {
+      try {
+        const result = await callAdminFunction('createAdminInvitation', {
+          email: inviteEmail.trim(),
+          role: inviteRole,
+          note: inviteNote.trim(),
+        });
+        setCreatedInvite(result.data as AdminInvitation & { reused?: boolean });
+        setInviteEmail('');
+        setInviteNote('');
+        await loadAll();
+      } catch (error) {
+        setInviteError(friendlyCallableError(error));
+      } finally {
+        setIsCreating(false);
+      }
+    })();
+  };
+
+  const handleCopyInviteMessage = async () => {
+    if (!createdInvite) return;
+    const roleLabel = createdInvite.role === 'admin' ? 'Administrator' : 'Customer Service';
+    const message =
+      `You have been invited to JOIN THE QUEUE as ${roleLabel}.\n\n` +
+      `1. Sign in with this invited Google account at the app.\n` +
+      `2. Open your Profile and tap the staff console button.\n` +
+      `3. Choose "Redeem Staff Invitation".\n\n` +
+      `Invitation code: ${createdInvite.code ?? 'n/a'} (valid for 7 days).`;
+    try {
+      await navigator.clipboard.writeText(message);
+      setInviteCopied(true);
+      window.setTimeout(() => setInviteCopied(false), 2000);
+    } catch {
+      // Clipboard restricted — the invitation code is still visible for manual copy
+    }
+  };
+
+  const handleRevokeInvitation = async (invitationId: string) => {
+    setActionError(null);
+    try {
+      await callAdminFunction('revokeAdminInvitation', { invitationId });
+      await loadAll();
+    } catch (error) {
+      setActionError(friendlyCallableError(error));
+    }
+  };
+
+  const handleRevokeAccess = async (targetUid: string, role: 'admin' | 'support') => {
+    setActionError(null);
+    try {
+      await callAdminFunction('revokeAdminAccess', { targetUid, role });
+      setConfirmingRevokeId(null);
+      await loadAll();
+    } catch (error) {
+      setActionError(friendlyCallableError(error));
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-[#181818] p-5 sm:p-6 space-y-4">
+      <div className="flex items-center gap-3 pb-3 border-b border-white/10">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#1DB954]/30 bg-[#1DB954]/10 text-[#1DB954]">
+          <Shield className="h-5 w-5" aria-hidden="true" />
+        </div>
+        <div>
+          <h3 className="text-base font-bold text-white">Team Access</h3>
+          <p className="text-xs text-[#B3B3B3]">Super Admin · invite and revoke staff</p>
+        </div>
+      </div>
+
+      {/* Invite form */}
+      <form onSubmit={handleCreateInvitation} className="space-y-3">
+        <div>
+          <label htmlFor="invite-staff-email" className="block text-xs font-medium text-white mb-1.5">
+            Staff Google account email
+          </label>
+          <input
+            id="invite-staff-email"
+            type="email"
+            required
+            placeholder="staff@example.com"
+            value={inviteEmail}
+            onChange={(e) => setInviteEmail(e.target.value)}
+            className="w-full min-h-[44px] rounded-xl border border-white/15 bg-[#121212] px-3.5 py-2 text-sm text-white placeholder:text-[#B3B3B3]/50 focus:border-[#1DB954] focus:outline-none"
+          />
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label htmlFor="invite-staff-role" className="block text-xs font-medium text-white mb-1.5">
+              Role
+            </label>
+            <select
+              id="invite-staff-role"
+              value={inviteRole}
+              onChange={(e) => setInviteRole(e.target.value as 'admin' | 'support')}
+              className="w-full min-h-[44px] rounded-xl border border-white/15 bg-[#121212] px-3.5 py-2 text-sm font-medium text-white focus:border-[#1DB954] focus:outline-none"
+            >
+              <option value="support">Customer Service</option>
+              <option value="admin">Administrator</option>
+            </select>
+          </div>
+          <div>
+            <label htmlFor="invite-staff-note" className="block text-xs font-medium text-white mb-1.5">
+              Note (optional)
+            </label>
+            <input
+              id="invite-staff-note"
+              type="text"
+              maxLength={280}
+              placeholder="e.g. Lagos ops desk"
+              value={inviteNote}
+              onChange={(e) => setInviteNote(e.target.value)}
+              className="w-full min-h-[44px] rounded-xl border border-white/15 bg-[#121212] px-3.5 py-2 text-sm text-white placeholder:text-[#B3B3B3]/50 focus:border-[#1DB954] focus:outline-none"
+            />
+          </div>
+        </div>
+
+        {inviteError && (
+          <p className="text-xs text-red-400" role="alert">
+            {inviteError}
+          </p>
+        )}
+
+        <button
+          type="submit"
+          disabled={isCreating}
+          className="w-full inline-flex items-center justify-center gap-2 min-h-[44px] rounded-full bg-[#1DB954] px-5 py-2.5 text-xs font-bold text-black hover:bg-[#15803D] hover:text-white transition-colors cursor-pointer disabled:opacity-70"
+        >
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          <span>{isCreating ? 'Creating invitation…' : 'Invite to Operations Team'}</span>
+        </button>
+      </form>
+
+      {createdInvite && (
+        <div className="rounded-xl border border-[#1DB954]/40 bg-[#1DB954]/5 p-4 space-y-2.5 text-xs">
+          <p className="font-semibold text-[#1DB954]">
+            {createdInvite.reused ? 'Existing pending invitation reused' : 'Invitation created'}
+          </p>
+          <p className="text-[#B3B3B3]">
+            Share this message with <span className="text-white">{createdInvite.email}</span>. The code is shown here; it is also stored in the invitation record.
+          </p>
+          {createdInvite.code && (
+            <p className="font-mono text-base font-extrabold text-[#1DB954] tabular-nums tracking-wider">
+              {createdInvite.code}
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={handleCopyInviteMessage}
+            className="inline-flex items-center gap-1.5 rounded-full border border-[#1DB954]/50 px-4 py-2 text-xs font-bold text-[#1DB954] hover:bg-[#1DB954] hover:text-black transition-colors cursor-pointer"
+          >
+            {inviteCopied ? (
+              <>
+                <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>Copied to clipboard</span>
+              </>
+            ) : (
+              <>
+                <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>Copy invitation message</span>
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
+      {actionError && (
+        <p className="text-xs text-red-400" role="alert">
+          {actionError}
+        </p>
+      )}
+
+      {listsError && (
+        <p className="text-xs text-amber-400" role="alert">
+          {listsError}
+        </p>
+      )}
+
+      {/* Staff directory */}
+      <div className="pt-2 border-t border-white/10 space-y-2">
+        <p className="text-xs font-semibold uppercase tracking-wider text-[#B3B3B3]">
+          Staff with access
+        </p>
+        {listsLoading ? (
+          <p className="text-xs text-[#B3B3B3] animate-pulse">Loading staff directory…</p>
+        ) : staff.length === 0 ? (
+          <p className="text-xs text-[#B3B3B3]">No staff accounts hold privileges yet.</p>
+        ) : (
+          <ul className="space-y-2">
+            {staff.map((member) => (
+              <li
+                key={member.uid}
+                className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#121212] px-3.5 py-2.5"
+              >
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-white truncate">{member.email ?? member.uid}</p>
+                  <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide">
+                    {member.superAdmin && <span className="text-[#1DB954]">Super Admin</span>}
+                    {member.admin && <span className="text-sky-400">Admin</span>}
+                    {member.support && <span className="text-amber-400">Support</span>}
+                    {member.disabled && <span className="text-red-400">Disabled</span>}
+                  </p>
+                </div>
+                {!member.superAdmin && member.uid !== currentUid && (
+                  <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                    {member.admin && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          confirmingRevokeId === `${member.uid}:admin`
+                            ? void handleRevokeAccess(member.uid, 'admin')
+                            : setConfirmingRevokeId(`${member.uid}:admin`)
+                        }
+                        className="min-h-[30px] rounded-full border border-red-500/40 bg-red-500/10 px-2.5 py-1 text-[10px] font-bold text-red-300 hover:bg-red-500/20 hover:text-white transition-colors cursor-pointer"
+                      >
+                        {confirmingRevokeId === `${member.uid}:admin` ? 'Confirm revoke admin' : 'Revoke admin'}
+                      </button>
+                    )}
+                    {member.support && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          confirmingRevokeId === `${member.uid}:support`
+                            ? void handleRevokeAccess(member.uid, 'support')
+                            : setConfirmingRevokeId(`${member.uid}:support`)
+                        }
+                        className="min-h-[30px] rounded-full border border-red-500/40 bg-red-500/10 px-2.5 py-1 text-[10px] font-bold text-red-300 hover:bg-red-500/20 hover:text-white transition-colors cursor-pointer"
+                      >
+                        {confirmingRevokeId === `${member.uid}:support` ? 'Confirm revoke support' : 'Revoke support'}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* Invitation ledger */}
+      <div className="pt-2 border-t border-white/10 space-y-2">
+        <p className="text-xs font-semibold uppercase tracking-wider text-[#B3B3B3]">
+          Invitations
+        </p>
+        {listsLoading ? (
+          <p className="text-xs text-[#B3B3B3] animate-pulse">Loading invitations…</p>
+        ) : invitations.length === 0 ? (
+          <p className="text-xs text-[#B3B3B3]">No invitations sent yet.</p>
+        ) : (
+          <ul className="space-y-2 max-h-56 overflow-y-auto">
+            {invitations.map((invite) => (
+              <li
+                key={invite.invitationId}
+                className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#121212] px-3.5 py-2.5"
+              >
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-white truncate">{invite.email}</p>
+                  <p className="mt-0.5 text-[10px] font-medium uppercase tracking-wide">
+                    <span className="text-[#B3B3B3]">{invite.role}</span>
+                    <span className="text-white/25"> · </span>
+                    <span className={INVITE_STATUS_CLASSES[invite.status] ?? 'text-[#B3B3B3]'}>{invite.status}</span>
+                  </p>
+                </div>
+                {invite.status === 'pending' && (
+                  <button
+                    type="button"
+                    onClick={() => void handleRevokeInvitation(invite.invitationId)}
+                    className="min-h-[30px] shrink-0 rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-bold text-[#B3B3B3] hover:border-red-500/40 hover:text-red-300 transition-colors cursor-pointer"
+                  >
+                    Revoke
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// ADMINISTRATIVE AUDIT LOG (read-only, super admins and admins)
+// ============================================================================
+
+interface AuditLogEntry {
+  id: string;
+  type: string;
+  actorEmail: string | null;
+  targetEmail: string | null;
+  targetUid: string | null;
+  role: string | null;
+  invitationId: string | null;
+  createdAt: number | null;
+}
+
+const AUDIT_TYPE_LABELS: Record<string, string> = {
+  bootstrap_super_admin: 'Super admin bootstrapped',
+  invitation_created: 'Invitation created',
+  invitation_redeemed: 'Staff access granted',
+  invitation_revoked: 'Invitation revoked',
+  access_revoked: 'Staff access revoked',
+};
+
+function AdminAuditLogPanel() {
+  const [entries, setEntries] = useState<AuditLogEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    callAdminFunction('listAdminAuditLog', {})
+      .then((result) => {
+        if (mounted) {
+          setEntries((((result.data as any)?.entries) as AuditLogEntry[]) ?? []);
+        }
+      })
+      .catch((err) => {
+        if (mounted) {
+          setError(friendlyCallableError(err));
+        }
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-[#181818] p-5 sm:p-6 space-y-4">
+      <div className="flex items-center gap-3 pb-3 border-b border-white/10">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/15 bg-[#121212] text-[#B3B3B3]">
+          <History className="h-5 w-5" aria-hidden="true" />
+        </div>
+        <div>
+          <h3 className="text-base font-bold text-white">Audit Log</h3>
+          <p className="text-xs text-[#B3B3B3]">Role changes and invitations</p>
+        </div>
+      </div>
+
+      {loading ? (
+        <p className="text-xs text-[#B3B3B3] animate-pulse">Loading audit log…</p>
+      ) : error ? (
+        <p className="text-xs text-amber-400" role="alert">
+          {error}
+        </p>
+      ) : entries.length === 0 ? (
+        <p className="text-xs text-[#B3B3B3]">No administrative events recorded yet.</p>
+      ) : (
+        <ul className="space-y-2 max-h-72 overflow-y-auto">
+          {entries.map((entry) => (
+            <li key={entry.id} className="rounded-xl border border-white/10 bg-[#121212] px-3.5 py-2.5">
+              <p className="text-xs font-semibold text-white">{AUDIT_TYPE_LABELS[entry.type] ?? entry.type}</p>
+              <p className="mt-0.5 break-words text-[11px] text-[#B3B3B3]">
+                {entry.actorEmail ?? 'unknown'}
+                {entry.targetEmail ? ` → ${entry.targetEmail}` : ''}
+                {entry.role ? ` · ${entry.role}` : ''}
+              </p>
+              <p className="mt-0.5 text-[10px] text-white/35 tabular-nums">{formatAuditTimestamp(entry.createdAt)}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+

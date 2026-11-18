@@ -120,7 +120,11 @@ export interface FormErrors {
   acceptedTerms?: string;
 }
 
-export type OrderModalStep = 'form' | 'checkout' | 'success';
+export type OrderModalStep =
+  | 'form'
+  | 'checkout'
+  | 'awaiting-payment'
+  | 'success';
 
 export interface CompletedOrder {
   referenceId: string;

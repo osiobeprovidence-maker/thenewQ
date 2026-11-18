@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ArrowRight, Headphones, Users } from 'lucide-react';
+import heroImage from '../assets/images/hero_queue_waves_1794907811028.jpg';
 import { BRAND_INFO } from '../data/subscriptions';
 
 interface HeroSectionProps {
@@ -76,7 +77,7 @@ export function HeroSection({ onExplorePlans, onHowItWorks }: HeroSectionProps) 
             <div className="relative w-full overflow-hidden rounded-2xl border border-white/10 bg-[#121212] min-h-[300px] sm:min-h-[360px] lg:min-h-[420px]">
               {!imageError ? (
                 <img
-                  src="/src/assets/images/hero_queue_waves_1794907811028.jpg"
+                  src={heroImage}
                   alt="Illustration of people stepping forward in a queue toward green acoustic sound waves and a music disc"
                   referrerPolicy="no-referrer"
                   onError={() => setImageError(true)}
