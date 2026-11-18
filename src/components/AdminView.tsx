@@ -94,7 +94,7 @@ interface AdminViewProps {
   onDeleteGroup: (groupId: string) => Promise<void>;
   onUpdateGroupDetails: (
     groupId: string,
-    payload: { groupName: string; homeAddress: string; capacity?: number }
+    payload: { groupName: string; homeAddress: string; capacity?: number; inviteLink?: string }
   ) => void;
   onDispatchGroupToInbox: (groupId: string) => number;
   onSetGroupLeader: (groupId: string, memberId: string) => void;
@@ -179,6 +179,7 @@ export function AdminView({
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupPlanId, setNewGroupPlanId] = useState<string>('');
   const [newGroupAddress, setNewGroupAddress] = useState('');
+  const [newGroupInviteLink, setNewGroupInviteLink] = useState('');
   const [newGroupMaxSlots, setNewGroupMaxSlots] = useState('6');
   const [groupFormError, setGroupFormError] = useState<string | null>(null);
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
@@ -197,6 +198,7 @@ export function AdminView({
   // Edit selected group details state
   const [editGroupName, setEditGroupName] = useState('');
   const [editHomeAddress, setEditHomeAddress] = useState('');
+  const [editInviteLink, setEditInviteLink] = useState('');
   const [editGroupCapacity, setEditGroupCapacity] = useState('6');
   const [editGroupError, setEditGroupError] = useState<string | null>(null);
 
@@ -241,6 +243,7 @@ export function AdminView({
     if (selectedGroup) {
       setEditGroupName(selectedGroup.groupName);
       setEditHomeAddress(selectedGroup.homeAddress);
+      setEditInviteLink(selectedGroup.inviteLink || '');
       setEditGroupCapacity(String(selectedGroup.maxSlots));
       setEditGroupError(null);
       setConfirmRemoveMemberId(null);
@@ -332,10 +335,12 @@ export function AdminView({
         planId,
         homeAddress: trimmedAddress,
         maxSlots: parsedSlots,
+        inviteLink: newGroupInviteLink.trim() || undefined,
       });
       setSelectedGroupId(createdGroupId);
       setNewGroupName('');
       setNewGroupAddress('');
+      setNewGroupInviteLink('');
       setNewGroupMaxSlots('6');
       setShowCreateGroupForm(false);
       showNotice(`Created group "${trimmedName}" with an auto-generated Group Code.`);
@@ -383,8 +388,9 @@ export function AdminView({
       groupName: trimmedName,
       homeAddress: trimmedAddress,
       capacity: parsedCapacity,
+      inviteLink: editInviteLink.trim() || undefined,
     });
-    showNotice(`Saved updated name, home address, and capacity for ${trimmedName}.`);
+    showNotice(`Saved updated details for ${trimmedName}.`);
   };
 
   const handleDeleteGroup = async () => {
@@ -1177,7 +1183,7 @@ export function AdminView({
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="sm:col-span-2">
+                  <div>
                     <label
                       htmlFor="new-group-address"
                       className="block text-sm font-medium text-white mb-1.5"
@@ -1190,6 +1196,23 @@ export function AdminView({
                       placeholder="e.g. 22 Bourdillon Road, Ikoyi, Lagos"
                       value={newGroupAddress}
                       onChange={(e) => setNewGroupAddress(e.target.value)}
+                      className="w-full min-h-[46px] rounded-xl border border-white/15 bg-[#121212] px-4 py-2.5 text-sm text-white placeholder:text-[#B3B3B3]/50 focus:border-[#1DB954] focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="new-group-invite"
+                      className="block text-sm font-medium text-white mb-1.5"
+                    >
+                      Invite Link (optional)
+                    </label>
+                    <input
+                      id="new-group-invite"
+                      type="url"
+                      placeholder="Leave blank for auto-generated link"
+                      value={newGroupInviteLink}
+                      onChange={(e) => setNewGroupInviteLink(e.target.value)}
                       className="w-full min-h-[46px] rounded-xl border border-white/15 bg-[#121212] px-4 py-2.5 text-sm text-white placeholder:text-[#B3B3B3]/50 focus:border-[#1DB954] focus:outline-none"
                     />
                   </div>
@@ -1431,22 +1454,21 @@ export function AdminView({
                                   className="h-3.5 w-3.5 text-[#1DB954]"
                                   aria-hidden="true"
                                 />
-                                <span>Invite Link (read-only)</span>
+                                <span>Invite Link</span>
                               </label>
                               <div className="flex items-stretch gap-2">
                                 <input
                                   id="edit-invite-link"
                                   type="url"
-                                  readOnly
-                                  value={selectedGroup.inviteLink}
-                                  onFocus={(e) => e.target.select()}
-                                  className="w-full min-h-[44px] rounded-xl border border-white/15 bg-[#121212]/60 px-3.5 py-2 text-sm font-mono text-[#B3B3B3] focus:border-[#1DB954] focus:outline-none cursor-text"
+                                  value={editInviteLink}
+                                  onChange={(e) => setEditInviteLink(e.target.value)}
+                                  className="w-full min-h-[44px] rounded-xl border border-white/15 bg-[#121212] px-3.5 py-2 text-sm font-mono text-white focus:border-[#1DB954] focus:outline-none"
                                 />
                                 <button
                                   type="button"
                                   onClick={() => {
                                     try {
-                                      void navigator.clipboard?.writeText(selectedGroup.inviteLink);
+                                      void navigator.clipboard?.writeText(editInviteLink || selectedGroup.inviteLink);
                                       showNotice('Invite link copied to clipboard.');
                                     } catch {
                                       showNotice('Share the invite link manually from the field above.');

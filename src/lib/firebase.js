@@ -1,5 +1,5 @@
 import { getApps, initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { getAuth, browserLocalPersistence, setPersistence } from 'firebase/auth';
 import { getFrontendConfig } from './config';
 
 /**
@@ -33,3 +33,12 @@ export const app = configResult.ok
 
 /** @type {import('firebase/auth').Auth} */
 export const auth = app ? getAuth(app) : /** @type {any} */ (null);
+
+// Explicitly set persistence to avoid cross-tab IndexedDB DB_TIMEOUT polling errors.
+// browserLocalPersistence uses localStorage which is more reliable across tabs
+// than the default indexedDB cross-tab sync mechanism.
+if (auth) {
+  setPersistence(auth, browserLocalPersistence).catch((err) => {
+    console.warn('[Firebase] Could not set auth persistence:', err);
+  });
+}
