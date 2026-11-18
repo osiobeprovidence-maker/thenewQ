@@ -424,7 +424,7 @@ export function OrderModal({
               <div className="flex items-start gap-3 rounded-xl border border-[#1DB954]/30 bg-[#121212] px-4 py-3 text-xs text-[#B3B3B3]">
                 <CreditCard className="h-4 w-4 text-[#1DB954] shrink-0 mt-0.5" aria-hidden="true" />
                 <p className="leading-relaxed">
-                  Secure checkout — you will be redirected to Bachs&apos; sandbox checkout page to complete payment. No money moves until payment is verified server-side.
+                  Secure checkout — you will be redirected to Bachs&apos; secure payment page to complete payment. Money only moves after the payment is verified server-side.
                 </p>
               </div>
             )}
@@ -517,7 +517,7 @@ export function OrderModal({
                     <span>{checkoutMode === 'live' ? 'Opening secure checkout…' : 'Preparing summary…'}</span>
                   </>
                 ) : (
-                  <span>{checkoutMode === 'live' ? 'Pay with Bachs (sandbox)' : 'Confirm Order'}</span>
+                  <span>{checkoutMode === 'live' ? 'Pay securely with Bachs' : 'Confirm Order'}</span>
                 )}
               </button>
             </div>
