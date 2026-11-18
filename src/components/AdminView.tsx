@@ -35,7 +35,7 @@ import {
   formatPlanPrice,
 } from '../data/subscriptions';
 import { useAuth } from '../context/AuthContext';
-import { callAdminFunction } from '../lib/firebaseClaims.js';
+import { bootstrapSuperAdmin, callAdminFunction } from '../lib/firebaseClaims.js';
 import { SupportSocialsPanel } from './SupportSocialsPanel';
 
 /** Strips noisy Firebase prefixes so callable errors read naturally in the UI. */
@@ -55,6 +55,14 @@ import type {
   SubscriptionPlan,
   SupportPermissions,
 } from '../types/subscription';
+
+/** Designated bootstrap accounts that may claim Super Admin access (server re-verifies). */
+const DESIGNATED_SUPER_ADMIN_EMAILS = ['riderezzy@gmail.com', 'osiobeprovidence@gmail.com'] as const;
+
+function isDesignatedSuperAdminEmail(email: string | null | undefined): boolean {
+  const normalized = (email ?? '').trim().toLowerCase();
+  return (DESIGNATED_SUPER_ADMIN_EMAILS as readonly string[]).includes(normalized);
+}
 
 interface AdminViewProps {
   plans: SubscriptionPlan[];
@@ -131,6 +139,8 @@ export function AdminView({
   } = useAuth();
   const [inviteRedeemState, setInviteRedeemState] = useState<'idle' | 'loading' | 'error'>('idle');
   const [inviteRedeemMessage, setInviteRedeemMessage] = useState<string | null>(null);
+  const [claimState, setClaimState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [claimMessage, setClaimMessage] = useState<string | null>(null);
 
   // Effective role: superAdmin implies admin; support is support-only.
   const isAdmin = isSuperAdmin || hasAdminClaim;
@@ -469,6 +479,27 @@ export function AdminView({
     }
   };
 
+  // One-time, self-service super admin bootstrap for the two designated accounts.
+  const handleClaimSuperAdmin = async () => {
+    setClaimState('loading');
+    setClaimMessage(null);
+    try {
+      const result = await bootstrapSuperAdmin();
+      if (result?.granted) {
+        await refreshClaims();
+        // Claims now include superAdmin + admin; this view flips to the full console.
+        setClaimState('success');
+        setClaimMessage(null);
+      } else {
+        setClaimState('error');
+        setClaimMessage('The claim did not complete. Please try again in a moment.');
+      }
+    } catch (e) {
+      setClaimState('error');
+      setClaimMessage(friendlyCallableError(e));
+    }
+  };
+
   // Waiting for Firebase to report auth state — show a neutral skeleton, never data.
   if (authLoading) {
     return (
@@ -523,31 +554,65 @@ export function AdminView({
                   <p className="text-[#B3B3B3]">
                     Signed in as: <strong className="text-white">{currentUser.email}</strong>
                   </p>
-                  <p className="text-amber-400 font-medium">
-                    This account does not hold staff privileges (superAdmin, admin, or support).
-                  </p>
+                  {isDesignatedSuperAdminEmail(currentUser.email) ? (
+                    <p className="text-[#1DB954] font-medium">
+                      Designated Super Admin account detected — claim your access below.
+                    </p>
+                  ) : (
+                    <p className="text-amber-400 font-medium">
+                      This account does not hold staff privileges (superAdmin, admin, or support).
+                    </p>
+                  )}
                 </div>
 
-                <p className="text-xs text-[#B3B3B3] leading-relaxed">
-                  Administrative access is granted by invitation only. If you were invited to the
-                  operations team, redeem your invitation below — the platform assigns the role to
-                  your verified Google identity.
-                </p>
+                {isDesignatedSuperAdminEmail(currentUser.email) ? (
+                  <>
+                    <p className="text-xs text-[#B3B3B3] leading-relaxed">
+                      This is a designated bootstrap Super Admin account. Claiming access grants
+                      your verified Google session the superAdmin + admin claims immediately.
+                      One click — no invitation needed.
+                    </p>
 
-                {inviteRedeemMessage && (
-                  <p className="rounded-xl border border-red-500/30 bg-red-950/40 p-3 text-xs text-red-300" role="alert">
-                    {inviteRedeemMessage}
-                  </p>
+                    {claimMessage && (
+                      <p className="rounded-xl border border-red-500/30 bg-red-950/40 p-3 text-xs text-red-300" role="alert">
+                        {claimMessage}
+                      </p>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={handleClaimSuperAdmin}
+                      disabled={claimState === 'loading'}
+                      className="w-full inline-flex items-center justify-center gap-2 min-h-[46px] rounded-full border border-[#1DB954] bg-[#1DB954]/10 px-6 py-3 text-sm font-bold text-[#1DB954] transition-colors hover:bg-[#1DB954] hover:text-black cursor-pointer disabled:opacity-70"
+                    >
+                      <Crown className="h-4 w-4" aria-hidden="true" />
+                      {claimState === 'loading' ? 'Granting Super Admin…' : 'Claim Super Admin Access'}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xs text-[#B3B3B3] leading-relaxed">
+                      Administrative access is granted by invitation only. If you were invited to the
+                      operations team, redeem your invitation below — the platform assigns the role to
+                      your verified Google identity.
+                    </p>
+
+                    {inviteRedeemMessage && (
+                      <p className="rounded-xl border border-red-500/30 bg-red-950/40 p-3 text-xs text-red-300" role="alert">
+                        {inviteRedeemMessage}
+                      </p>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={handleRedeemInvitation}
+                      disabled={inviteRedeemState === 'loading'}
+                      className="w-full inline-flex items-center justify-center gap-2 min-h-[46px] rounded-full bg-[#1DB954] px-6 py-3 text-sm font-bold text-black transition-colors hover:bg-[#15803D] hover:text-white cursor-pointer disabled:opacity-70"
+                    >
+                      {inviteRedeemState === 'loading' ? 'Checking invitation…' : 'Redeem Staff Invitation'}
+                    </button>
+                  </>
                 )}
-
-                <button
-                  type="button"
-                  onClick={handleRedeemInvitation}
-                  disabled={inviteRedeemState === 'loading'}
-                  className="w-full inline-flex items-center justify-center gap-2 min-h-[46px] rounded-full bg-[#1DB954] px-6 py-3 text-sm font-bold text-black transition-colors hover:bg-[#15803D] hover:text-white cursor-pointer disabled:opacity-70"
-                >
-                  {inviteRedeemState === 'loading' ? 'Checking invitation…' : 'Redeem Staff Invitation'}
-                </button>
 
                 <button
                   type="button"

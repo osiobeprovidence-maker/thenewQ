@@ -25,6 +25,16 @@ export async function callAdminFunction(name, data) {
 }
 
 /**
+ * Claim Super Admin access for the two designated bootstrap accounts.
+ * Self-service: the server verifies a Google-verified sign-in whose email is
+ * in SUPER_ADMIN_EMAILS. Everyone else receives permission-denied.
+ */
+export async function bootstrapSuperAdmin() {
+  const result = await callAdminFunction('bootstrapSuperAdmin', {});
+  return /** @type {{ granted: boolean, alreadyGranted?: boolean, email?: string } | null} */ (result.data ?? null);
+}
+
+/**
  * Returns the caller's pending staff invitation (if any).
  * Returns { pending: false } for unauthenticated callers or errors — never leaks
  * whether an invitation exists for an arbitrary email.

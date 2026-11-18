@@ -144,8 +144,13 @@ export default function App() {
       : isSupport
         ? 'support'
         : null;
-  // Visible staff console only for staff or users with a pending invitation.
-  const canOpenStaffConsole = staffAccess !== null || hasPendingStaffInvite;
+  // Designated bootstrap accounts may claim super admin access (server re-verifies).
+  const designatedSuperAdminAvailable = ['riderezzy@gmail.com', 'osiobeprovidence@gmail.com'].includes(
+    (currentUser?.email ?? '').trim().toLowerCase()
+  );
+  // Visible staff console only for staff, invited users, or designated bootstrap accounts.
+  const canOpenStaffConsole =
+    staffAccess !== null || hasPendingStaffInvite || designatedSuperAdminAvailable;
   const [plans, setPlans] = useState<SubscriptionPlan[]>(SUBSCRIPTION_PLANS);
   const [groups, setGroups] = useState<SubscriptionGroup[]>(INITIAL_SUBSCRIPTION_GROUPS);
   const [platformTransactions, setPlatformTransactions] = useState<PlatformTransaction[]>(
@@ -1215,6 +1220,7 @@ export default function App() {
             onJoinNewSlot={handleJoinNowFromNav}
             onOpenAdminConsole={currentUser && canOpenStaffConsole ? openAdminView : undefined}
             staffAccess={staffAccess}
+            designatedSuperAdminAvailable={designatedSuperAdminAvailable && staffAccess === null}
             onTriggerNextPayment={handleTriggerNextPayment}
             onCancelSubscriptionSlot={handleCancelSubscriptionSlot}
             onMarkInboxRead={handleMarkInboxRead}
