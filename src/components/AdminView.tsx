@@ -88,12 +88,12 @@ interface AdminViewProps {
     groupName: string;
     planId: string;
     homeAddress: string;
-    inviteLink: string;
     maxSlots: number;
-  }) => string;
+  }) => Promise<string>;
+  onDeleteGroup: (groupId: string) => Promise<void>;
   onUpdateGroupDetails: (
     groupId: string,
-    payload: { groupName: string; homeAddress: string; inviteLink: string }
+    payload: { groupName: string; homeAddress: string; capacity?: number }
   ) => void;
   onDispatchGroupToInbox: (groupId: string) => number;
   onSetGroupLeader: (groupId: string, memberId: string) => void;
@@ -129,6 +129,7 @@ export function AdminView({
   onRequestSignIn,
   onUpdateSupportPermissions,
   onCreateGroup,
+  onDeleteGroup,
   onUpdateGroupDetails,
   onDispatchGroupToInbox,
   onSetGroupLeader,
@@ -175,21 +176,33 @@ export function AdminView({
   // Create group form state
   const [showCreateGroupForm, setShowCreateGroupForm] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
-  const [newGroupPlanId, setNewGroupPlanId] = useState<string>(plans[0]?.id ?? '');
+  const [newGroupPlanId, setNewGroupPlanId] = useState<string>('');
   const [newGroupAddress, setNewGroupAddress] = useState('');
-  const [newGroupLink, setNewGroupLink] = useState('');
   const [newGroupMaxSlots, setNewGroupMaxSlots] = useState('6');
   const [groupFormError, setGroupFormError] = useState<string | null>(null);
+  const [isCreatingGroup, setIsCreatingGroup] = useState(false);
+
+  // Live sellable plans come from Supabase (UUID ids). Bundled demo slugs can't be persisted.
+  const sellablePlans = plans.filter((p) =>
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(p.id)
+  );
+
+  useEffect(() => {
+    if (!newGroupPlanId && sellablePlans.length > 0) {
+      setNewGroupPlanId(sellablePlans[0].id);
+    }
+  }, [sellablePlans, newGroupPlanId]);
 
   // Edit selected group details state
   const [editGroupName, setEditGroupName] = useState('');
   const [editHomeAddress, setEditHomeAddress] = useState('');
-  const [editInviteLink, setEditInviteLink] = useState('');
+  const [editGroupCapacity, setEditGroupCapacity] = useState('6');
   const [editGroupError, setEditGroupError] = useState<string | null>(null);
 
   // Copy & inline removal confirmation state
   const [copiedCodeGroupId, setCopiedCodeGroupId] = useState<string | null>(null);
   const [confirmRemoveMemberId, setConfirmRemoveMemberId] = useState<string | null>(null);
+  const [confirmDeleteGroupId, setConfirmDeleteGroupId] = useState<string | null>(null);
 
   // Add subscription plan form state
   const [planName, setPlanName] = useState('');
@@ -227,7 +240,7 @@ export function AdminView({
     if (selectedGroup) {
       setEditGroupName(selectedGroup.groupName);
       setEditHomeAddress(selectedGroup.homeAddress);
-      setEditInviteLink(selectedGroup.inviteLink);
+      setEditGroupCapacity(String(selectedGroup.maxSlots));
       setEditGroupError(null);
       setConfirmRemoveMemberId(null);
     }
@@ -286,11 +299,10 @@ export function AdminView({
     window.setTimeout(() => setCopiedCodeGroupId(null), 2000);
   };
 
-  const handleCreateGroupSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleCreateGroupSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmedName = newGroupName.trim();
     const trimmedAddress = newGroupAddress.trim();
-    const trimmedLink = newGroupLink.trim();
     const parsedSlots = Number(newGroupMaxSlots);
 
     if (trimmedName.length < 3) {
@@ -301,31 +313,36 @@ export function AdminView({
       setGroupFormError('Please enter the home address for this group.');
       return;
     }
-    if (!trimmedLink.startsWith('http://') && !trimmedLink.startsWith('https://')) {
-      setGroupFormError('Please enter a valid invite link starting with https:// or http://.');
+    const planId = newGroupPlanId || sellablePlans[0]?.id;
+    if (!planId) {
+      setGroupFormError('No live subscription plans available yet. Add plans first.');
       return;
     }
-    if (!Number.isInteger(parsedSlots) || parsedSlots < 2 || parsedSlots > 20) {
-      setGroupFormError('Max slots must be a whole number between 2 and 20.');
+    if (!Number.isInteger(parsedSlots) || parsedSlots < 2 || parsedSlots > 200) {
+      setGroupFormError('Max slots must be a whole number between 2 and 200.');
       return;
     }
 
     setGroupFormError(null);
-    const createdGroupId = onCreateGroup({
-      groupName: trimmedName,
-      planId: newGroupPlanId || plans[0].id,
-      homeAddress: trimmedAddress,
-      inviteLink: trimmedLink,
-      maxSlots: parsedSlots,
-    });
-
-    setSelectedGroupId(createdGroupId);
-    setNewGroupName('');
-    setNewGroupAddress('');
-    setNewGroupLink('');
-    setNewGroupMaxSlots('6');
-    setShowCreateGroupForm(false);
-    showNotice(`Created group "${trimmedName}" with an auto-generated Group Code.`);
+    setIsCreatingGroup(true);
+    try {
+      const createdGroupId = await onCreateGroup({
+        groupName: trimmedName,
+        planId,
+        homeAddress: trimmedAddress,
+        maxSlots: parsedSlots,
+      });
+      setSelectedGroupId(createdGroupId);
+      setNewGroupName('');
+      setNewGroupAddress('');
+      setNewGroupMaxSlots('6');
+      setShowCreateGroupForm(false);
+      showNotice(`Created group "${trimmedName}" with an auto-generated Group Code.`);
+    } catch (error) {
+      setGroupFormError(friendlyCallableError(error));
+    } finally {
+      setIsCreatingGroup(false);
+    }
   };
 
   const handleUpdateGroupSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -334,18 +351,29 @@ export function AdminView({
 
     const trimmedName = editGroupName.trim();
     const trimmedAddress = editHomeAddress.trim();
-    const trimmedLink = editInviteLink.trim();
+    const parsedCapacity = Number(editGroupCapacity);
+    const activeMembers = selectedGroup.members.filter(
+      (m) => m.paymentStatus !== 'Cancelled'
+    ).length;
 
     if (trimmedName.length < 3) {
       setEditGroupError('Group name must be at least 3 characters.');
       return;
     }
-    if (trimmedAddress.length < 5) {
+    if (trimmedAddress.trim().length < 5) {
       setEditGroupError('Please provide a valid home address.');
       return;
     }
-    if (!trimmedLink.startsWith('http://') && !trimmedLink.startsWith('https://')) {
-      setEditGroupError('Invite link must start with https:// or http://.');
+    if (
+      !Number.isInteger(parsedCapacity) ||
+      parsedCapacity < Math.max(2, activeMembers) ||
+      parsedCapacity > 200
+    ) {
+      setEditGroupError(
+        `Capacity must be a whole number between ${Math.max(2, activeMembers)} and 200${
+          activeMembers > 0 ? ` (at least the current ${activeMembers} members)` : ''
+        }.`
+      );
       return;
     }
 
@@ -353,23 +381,36 @@ export function AdminView({
     onUpdateGroupDetails(selectedGroup.id, {
       groupName: trimmedName,
       homeAddress: trimmedAddress,
-      inviteLink: trimmedLink,
+      capacity: parsedCapacity,
     });
-    showNotice(`Saved updated name, home address, and invite link for ${trimmedName}.`);
+    showNotice(`Saved updated name, home address, and capacity for ${trimmedName}.`);
+  };
+
+  const handleDeleteGroup = async () => {
+    if (!selectedGroup) return;
+    const target = selectedGroup;
+    setConfirmDeleteGroupId(null);
+    try {
+      await onDeleteGroup(target.id);
+      setSelectedGroupId('');
+      showNotice(`Group "${target.groupName}" was deleted permanently.`);
+    } catch (error) {
+      showNotice(friendlyCallableError(error));
+    }
   };
 
   const handleDispatchInbox = () => {
     if (!selectedGroup) return;
-    const deliveredCount = onDispatchGroupToInbox(selectedGroup.id);
-    if (deliveredCount > 0) {
+    const sharedMemberCount = onDispatchGroupToInbox(selectedGroup.id);
+    if (sharedMemberCount > 0) {
       showNotice(
-        `Sent ${selectedGroup.groupName} (${selectedGroup.groupCode}) invite link & home address to ${deliveredCount} user inbox ${
-          deliveredCount === 1 ? 'message' : 'messages'
-        }.`
+        `Invite link copied — share it with the ${sharedMemberCount} member${
+          sharedMemberCount === 1 ? '' : 's'
+        } of ${selectedGroup.groupName} (${selectedGroup.groupCode}), or forward it anywhere you like.`
       );
     } else {
       showNotice(
-        `Saved ${selectedGroup.groupName} (${selectedGroup.groupCode}). Members who join from the storefront will receive this link and address automatically.`
+        `Invite link for ${selectedGroup.groupName} (${selectedGroup.groupCode}) copied. Share it with anyone you want in this group.`
       );
     }
   };
@@ -1098,12 +1139,21 @@ export function AdminView({
                       onChange={(e) => setNewGroupPlanId(e.target.value)}
                       className="w-full min-h-[46px] rounded-xl border border-white/15 bg-[#121212] px-3.5 py-2.5 text-sm font-medium text-white focus:border-[#1DB954] focus:outline-none"
                     >
-                      {plans.map((plan) => (
-                        <option key={plan.id} value={plan.id}>
-                          {plan.name} ({formatPlanPrice(plan)})
-                        </option>
-                      ))}
+                      {sellablePlans.length === 0 ? (
+                        <option value="">No live plans available</option>
+                      ) : (
+                        sellablePlans.map((plan) => (
+                          <option key={plan.id} value={plan.id}>
+                            {plan.name} ({formatPlanPrice(plan)})
+                          </option>
+                        ))
+                      )}
                     </select>
+                    {sellablePlans.length === 0 && (
+                      <p className="mt-1.5 text-[11px] text-amber-400">
+                        Add live plans in the Subscriptions tab first.
+                      </p>
+                    )}
                   </div>
 
                   <div>
@@ -1117,7 +1167,7 @@ export function AdminView({
                       id="new-group-slots"
                       type="number"
                       min={2}
-                      max={20}
+                      max={200}
                       value={newGroupMaxSlots}
                       onChange={(e) => setNewGroupMaxSlots(e.target.value)}
                       className="w-full min-h-[46px] rounded-xl border border-white/15 bg-[#121212] px-4 py-2.5 text-sm font-mono text-white focus:border-[#1DB954] focus:outline-none"
@@ -1126,7 +1176,7 @@ export function AdminView({
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
+                  <div className="sm:col-span-2">
                     <label
                       htmlFor="new-group-address"
                       className="block text-sm font-medium text-white mb-1.5"
@@ -1142,23 +1192,6 @@ export function AdminView({
                       className="w-full min-h-[46px] rounded-xl border border-white/15 bg-[#121212] px-4 py-2.5 text-sm text-white placeholder:text-[#B3B3B3]/50 focus:border-[#1DB954] focus:outline-none"
                     />
                   </div>
-
-                  <div>
-                    <label
-                      htmlFor="new-group-link"
-                      className="block text-sm font-medium text-white mb-1.5"
-                    >
-                      Invite link
-                    </label>
-                    <input
-                      id="new-group-link"
-                      type="url"
-                      placeholder="https://jointhequeue.demo/slot-invite/group-02"
-                      value={newGroupLink}
-                      onChange={(e) => setNewGroupLink(e.target.value)}
-                      className="w-full min-h-[46px] rounded-xl border border-white/15 bg-[#121212] px-4 py-2.5 text-sm font-mono text-white placeholder:text-[#B3B3B3]/50 focus:border-[#1DB954] focus:outline-none"
-                    />
-                  </div>
                 </div>
 
                 {groupFormError && (
@@ -1170,22 +1203,47 @@ export function AdminView({
                 <div className="pt-1 flex items-center gap-3">
                   <button
                     type="submit"
-                    className="inline-flex items-center justify-center gap-2 min-h-[46px] rounded-full bg-[#1DB954] px-7 py-2.5 text-sm font-bold text-black hover:bg-[#15803D] hover:text-white transition-colors cursor-pointer"
+                    disabled={isCreatingGroup || (sellablePlans.length === 0 && newGroupPlanId === '')}
+                    className="inline-flex items-center justify-center gap-2 min-h-[46px] rounded-full bg-[#1DB954] px-7 py-2.5 text-sm font-bold text-black hover:bg-[#15803D] hover:text-white transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    <Plus className="h-4 w-4" aria-hidden="true" />
-                    <span>Create Group &amp; Generate Code</span>
+                    {isCreatingGroup ? (
+                      <span>Creating group…</span>
+                    ) : (
+                      <>
+                        <Plus className="h-4 w-4" aria-hidden="true" />
+                        <span>Create Group &amp; Generate Code</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </form>
             )}
 
             {visibleGroups.length === 0 ? (
-              <div className="rounded-2xl border border-white/10 bg-[#181818] p-10 text-center space-y-2">
-                <CheckCircle2 className="h-8 w-8 text-[#1DB954] mx-auto" aria-hidden="true" />
-                <h3 className="text-lg font-bold text-white">All Members Have Paid</h3>
-                <p className="text-sm text-[#B3B3B3]">
-                  There are currently no unpaid members requiring Customer Care follow-up.
-                </p>
+              <div className="rounded-2xl border border-white/10 bg-[#181818] p-10 text-center space-y-4">
+                <Layers className="h-10 w-10 text-[#1DB954] mx-auto" aria-hidden="true" />
+                <div>
+                  <h3 className="text-lg font-bold text-white">
+                    {isSupport && supportPermissions.viewScope === 'unpaid-only'
+                      ? 'No Unpaid Members Found'
+                      : 'No subscription groups have been created yet.'}
+                  </h3>
+                  <p className="mt-1.5 text-sm text-[#B3B3B3] max-w-md mx-auto">
+                    {isSupport && supportPermissions.viewScope === 'unpaid-only'
+                      ? 'There are currently no groups with members who have not paid yet.'
+                      : 'Groups created from the admin workspace are stored permanently. Everyone in a group shares its unique code, address, and invite link.'}
+                  </p>
+                </div>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateGroupForm(true)}
+                    className="inline-flex items-center gap-2 min-h-[44px] rounded-full bg-[#1DB954] px-6 py-2.5 text-sm font-bold text-black transition-colors hover:bg-[#15803D] hover:text-white cursor-pointer"
+                  >
+                    <FolderPlus className="h-4 w-4" aria-hidden="true" />
+                    <span>Create Your First Group</span>
+                  </button>
+                )}
               </div>
             ) : (
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -1224,9 +1282,16 @@ export function AdminView({
                             </h3>
                             <p className="text-xs text-[#B3B3B3] truncate">{grp.planName}</p>
                           </div>
-                          <span className="font-mono text-xs font-semibold text-white tabular-nums shrink-0">
-                            {activeCount}/{grp.maxSlots}
-                          </span>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {activeCount >= grp.maxSlots && (
+                              <span className="rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-amber-400">
+                                FULL
+                              </span>
+                            )}
+                            <span className="font-mono text-xs font-semibold text-white tabular-nums">
+                              {activeCount}/{grp.maxSlots}
+                            </span>
+                          </div>
                         </div>
 
                         <div className="mt-3 pt-3 border-t border-white/10 flex flex-wrap items-center justify-between gap-2 text-xs">
@@ -1266,6 +1331,15 @@ export function AdminView({
                               <span className="font-mono text-[#B3B3B3] tabular-nums">
                                 Created {formatDisplayDate(selectedGroup.createdAt)}
                               </span>
+                              <span className="text-white/25">·</span>
+                              <span className="font-mono font-semibold text-white tabular-nums">
+                                {selectedGroup.members.filter((m) => m.paymentStatus !== 'Cancelled').length}/{selectedGroup.maxSlots}
+                              </span>
+                              {selectedGroup.members.filter((m) => m.paymentStatus !== 'Cancelled').length >= selectedGroup.maxSlots && (
+                                <span className="rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-amber-400">
+                                  FULL
+                                </span>
+                              )}
                             </div>
                             <h3 className="mt-1 text-xl font-extrabold text-white">
                               {selectedGroup.groupName}
@@ -1303,8 +1377,29 @@ export function AdminView({
                               className="inline-flex items-center gap-1.5 min-h-[40px] rounded-full bg-[#1DB954] px-4 py-2 text-xs font-bold text-black hover:bg-[#15803D] hover:text-white transition-colors cursor-pointer"
                             >
                               <Send className="h-3.5 w-3.5" aria-hidden="true" />
-                              <span>Send Link &amp; Address to Inbox</span>
+                              <span>Copy Invite Link</span>
                             </button>
+
+                            {isAdmin && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  confirmDeleteGroupId === selectedGroup.id
+                                    ? void handleDeleteGroup()
+                                    : setConfirmDeleteGroupId(selectedGroup.id)
+                                }
+                                title="Delete permanently (groups with member history cannot be deleted)"
+                                aria-label="Delete group"
+                                className="inline-flex items-center gap-1.5 min-h-[40px] rounded-full border border-red-500/40 bg-red-500/10 px-4 py-2 text-xs font-bold text-red-300 transition-colors hover:bg-red-500/20 hover:text-white cursor-pointer"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                                <span>
+                                  {confirmDeleteGroupId === selectedGroup.id
+                                    ? 'Confirm delete'
+                                    : 'Delete group'}
+                                </span>
+                              </button>
+                            )}
                           </div>
                         </div>
 
@@ -1335,33 +1430,72 @@ export function AdminView({
                                   className="h-3.5 w-3.5 text-[#1DB954]"
                                   aria-hidden="true"
                                 />
-                                <span>Invite Link</span>
+                                <span>Invite Link (read-only)</span>
                               </label>
-                              <input
-                                id="edit-invite-link"
-                                type="url"
-                                value={editInviteLink}
-                                onChange={(e) => setEditInviteLink(e.target.value)}
-                                className="w-full min-h-[44px] rounded-xl border border-white/15 bg-[#121212] px-3.5 py-2 text-sm font-mono text-white focus:border-[#1DB954] focus:outline-none"
-                              />
+                              <div className="flex items-stretch gap-2">
+                                <input
+                                  id="edit-invite-link"
+                                  type="url"
+                                  readOnly
+                                  value={selectedGroup.inviteLink}
+                                  onFocus={(e) => e.target.select()}
+                                  className="w-full min-h-[44px] rounded-xl border border-white/15 bg-[#121212]/60 px-3.5 py-2 text-sm font-mono text-[#B3B3B3] focus:border-[#1DB954] focus:outline-none cursor-text"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    try {
+                                      void navigator.clipboard?.writeText(selectedGroup.inviteLink);
+                                      showNotice('Invite link copied to clipboard.');
+                                    } catch {
+                                      showNotice('Share the invite link manually from the field above.');
+                                    }
+                                  }}
+                                  aria-label="Copy invite link"
+                                  title="Copy invite link"
+                                  className="shrink-0 inline-flex w-11 items-center justify-center rounded-xl border border-white/15 text-[#1DB954] hover:border-[#1DB954] transition-colors cursor-pointer"
+                                >
+                                  <Copy className="h-4 w-4" aria-hidden="true" />
+                                </button>
+                              </div>
                             </div>
                           </div>
 
-                          <div>
-                            <label
-                              htmlFor="edit-home-address"
-                              className="inline-flex items-center gap-1.5 text-xs font-medium text-[#B3B3B3] mb-1.5"
-                            >
-                              <MapPin className="h-3.5 w-3.5 text-[#1DB954]" aria-hidden="true" />
-                              <span>Group Home Address</span>
-                            </label>
-                            <input
-                              id="edit-home-address"
-                              type="text"
-                              value={editHomeAddress}
-                              onChange={(e) => setEditHomeAddress(e.target.value)}
-                              className="w-full min-h-[44px] rounded-xl border border-white/15 bg-[#121212] px-3.5 py-2 text-sm text-white focus:border-[#1DB954] focus:outline-none"
-                            />
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                              <label
+                                htmlFor="edit-capacity"
+                                className="block text-xs font-medium text-[#B3B3B3] mb-1.5"
+                              >
+                                Max Members (Increase only)
+                              </label>
+                              <input
+                                id="edit-capacity"
+                                type="number"
+                                min={Math.max(2, selectedGroup.members.filter((m) => m.paymentStatus !== 'Cancelled').length)}
+                                max={200}
+                                value={editGroupCapacity}
+                                onChange={(e) => setEditGroupCapacity(e.target.value)}
+                                className="w-full min-h-[44px] rounded-xl border border-white/15 bg-[#121212] px-3.5 py-2 text-sm font-mono text-white focus:border-[#1DB954] focus:outline-none"
+                              />
+                            </div>
+
+                            <div>
+                              <label
+                                htmlFor="edit-home-address"
+                                className="inline-flex items-center gap-1.5 text-xs font-medium text-[#B3B3B3] mb-1.5"
+                              >
+                                <MapPin className="h-3.5 w-3.5 text-[#1DB954]" aria-hidden="true" />
+                                <span>Group Home Address</span>
+                              </label>
+                              <input
+                                id="edit-home-address"
+                                type="text"
+                                value={editHomeAddress}
+                                onChange={(e) => setEditHomeAddress(e.target.value)}
+                                className="w-full min-h-[44px] rounded-xl border border-white/15 bg-[#121212] px-3.5 py-2 text-sm text-white focus:border-[#1DB954] focus:outline-none"
+                              />
+                            </div>
                           </div>
 
                           {editGroupError && (

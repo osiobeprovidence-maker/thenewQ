@@ -21,6 +21,7 @@ import {
   Send,
   Settings,
   ShieldCheck,
+  Ticket,
   UserCheck,
   UserPlus,
   Users,
@@ -36,6 +37,13 @@ import {
   formatDisplayDate,
   formatPlanPrice,
 } from '../data/subscriptions';
+import {
+  fetchMyGroups,
+  joinGroupByCode,
+  previewGroupByCode,
+  type GroupPreview,
+  type MyGroupEntry,
+} from '../lib/groupService';
 import type {
   ActiveSubscription,
   BillingDurationMonths,
@@ -84,7 +92,8 @@ type ProfileSubView =
   | 'gift'
   | 'renew'
   | 'settings'
-  | 'marketplace';
+  | 'marketplace'
+  | 'join';
 
 interface PendingConfirmation {
   mode: 'renewal' | 'gift';
@@ -137,6 +146,74 @@ export function ProfileView({
   const [copiedInboxCodeId, setCopiedInboxCodeId] = useState<string | null>(null);
   const [copiedInboxLinkId, setCopiedInboxLinkId] = useState<string | null>(null);
   const [copiedInboxAddressId, setCopiedInboxAddressId] = useState<string | null>(null);
+
+  // Join-with-code state
+  const [joinCode, setJoinCode] = useState('');
+  const [joinPreview, setJoinPreview] = useState<GroupPreview | null>(null);
+  const [joinBusy, setJoinBusy] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
+  const [joinSuccess, setJoinSuccess] = useState<string | null>(null);
+  const [myGroups, setMyGroups] = useState<MyGroupEntry[]>([]);
+
+  const refreshMyGroups = () => {
+    fetchMyGroups()
+      .then((rows) => setMyGroups(rows))
+      .catch((err) => console.warn('[ProfileView] Could not load your groups:', err));
+  };
+
+  const handleLookupGroup = async () => {
+    const code = joinCode.trim().toUpperCase();
+    if (!/^GFT-\d{4}$/i.test(code)) {
+      setJoinError('Enter a valid group code (e.g. GFT-7471).');
+      setJoinPreview(null);
+      return;
+    }
+    setJoinBusy(true);
+    setJoinError(null);
+    setJoinSuccess(null);
+    try {
+      const preview = await previewGroupByCode(code);
+      setJoinPreview(preview);
+    } catch (err) {
+      setJoinPreview(null);
+      setJoinError(err instanceof Error ? err.message : 'No open group found with that code.');
+    } finally {
+      setJoinBusy(false);
+    }
+  };
+
+  const handleJoinGroup = async () => {
+    if (!joinPreview) return;
+    setJoinBusy(true);
+    setJoinError(null);
+    try {
+      const result = await joinGroupByCode(joinPreview.groupCode);
+      setJoinSuccess(
+        `You joined ${result.group_name} (${result.group_code}) for ${result.product_name}. ` +
+          (result.payment_status === 'Unpaid'
+            ? 'Your seat is reserved — arrange payment with your group admin.'
+            : 'The seat is yours!')
+      );
+      setJoinPreview(null);
+      setJoinCode('');
+      refreshMyGroups();
+    } catch (err) {
+      setJoinError(err instanceof Error ? err.message : 'Could not join this group.');
+    } finally {
+      setJoinBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshMyGroups();
+    // Prefill a ?join=GFT-XXXX invite link straight into the join flow
+    const fromUrl = new URLSearchParams(window.location.search).get('join');
+    if (fromUrl) {
+      setJoinCode(fromUrl.trim().toUpperCase());
+      setSubView('join');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Invite form state
   const [inviteName, setInviteName] = useState('');
@@ -679,6 +756,225 @@ export function ProfileView({
                   </div>
                 )}
               </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {subView === 'join' && (
+        <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 space-y-6 pb-16">
+          {/* Back navigation */}
+          <div className="flex items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={() => openSubPage('overview')}
+              className="inline-flex items-center gap-2 text-sm font-medium text-[#B3B3B3] hover:text-white transition-colors cursor-pointer"
+            >
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+              <span>Back to Profile Overview</span>
+            </button>
+          </div>
+
+          {/* Header */}
+          <div className="rounded-2xl border border-[#1DB954]/25 bg-[#181818] p-6 sm:p-8">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-[#1DB954]/40 bg-[#1DB954]/10 text-[#1DB954]">
+                <Ticket className="h-6 w-6" aria-hidden="true" />
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-[#1DB954]">
+                  Invite Only
+                </p>
+                <h1 className="mt-1 text-2xl font-extrabold text-white">Join With Your Invite Code</h1>
+                <p className="mt-1.5 text-sm text-[#B3B3B3]">
+                  Enter the group code your group admin shared with you (e.g. GFT-7471). You will
+                  see the group details first — nothing happens until you confirm.
+                </p>
+              </div>
+            </div>
+
+            {/* Code entry */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void handleLookupGroup();
+              }}
+              className="mt-6 flex flex-col sm:flex-row gap-3"
+            >
+              <div className="relative flex-1">
+                <Hash className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-[#6B6B6B]" aria-hidden="true" />
+                <input
+                  type="text"
+                  value={joinCode}
+                  onChange={(e) => {
+                    setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 8));
+                    setJoinError(null);
+                    setJoinSuccess(null);
+                  }}
+                  placeholder="GFT-7471"
+                  maxLength={8}
+                  aria-label="Group invite code"
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="w-full min-h-[50px] rounded-xl border border-white/15 bg-[#121212] pl-12 pr-4 text-lg font-mono font-extrabold uppercase tracking-widest text-[#1DB954] placeholder-[#4A4A4A] outline-none transition-colors focus:border-[#1DB954] focus:ring-1 focus:ring-[#1DB954]/40"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={joinBusy || joinCode.trim().length < 8}
+                className="inline-flex items-center justify-center gap-2 min-h-[50px] rounded-xl bg-[#1DB954] px-6 text-sm font-extrabold text-black transition-colors hover:bg-[#1ed760] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              >
+                {joinBusy ? 'Looking up…' : 'Preview Group'}
+              </button>
+            </form>
+
+            {joinError && (
+              <p className="mt-3 flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300" role="alert">
+                <XCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                <span>{joinError}</span>
+              </p>
+            )}
+            {joinSuccess && (
+              <p className="mt-3 flex items-start gap-2 rounded-xl border border-[#1DB954]/30 bg-[#1DB954]/10 px-4 py-3 text-sm text-[#1DB954]" role="status">
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                <span>{joinSuccess}</span>
+              </p>
+            )}
+
+            {/* Preview card */}
+            {joinPreview && (
+              <div className="mt-5 rounded-2xl border border-white/10 bg-[#121212] p-5 sm:p-6 space-y-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-[#B3B3B3]">
+                      {joinPreview.productName}
+                    </p>
+                    <h2 className="mt-1 text-lg font-extrabold text-white">{joinPreview.groupName}</h2>
+                    {joinPreview.homeAddress && (
+                      <p className="mt-1 flex items-center gap-1.5 text-xs text-[#B3B3B3]">
+                        <MapPin className="h-3.5 w-3.5 text-[#1DB954]" aria-hidden="true" />
+                        {joinPreview.homeAddress}
+                      </p>
+                    )}
+                  </div>
+                  <span
+                    className={`font-mono text-sm font-extrabold tabular-nums rounded-lg px-3 py-1.5 ${
+                      joinPreview.remaining > 0 ? 'bg-[#1DB954]/10 text-[#1DB954]' : 'bg-red-500/10 text-red-400'
+                    }`}
+                  >
+                    {joinPreview.occupied}/{joinPreview.capacity} seats
+                  </span>
+                </div>
+
+                <div className="h-2 w-full overflow-hidden rounded-full bg-white/10" aria-hidden="true">
+                  <div
+                    className={`h-full rounded-full transition-all ${joinPreview.remaining > 0 ? 'bg-[#1DB954]' : 'bg-red-500'}`}
+                    style={{ width: `${Math.min(100, Math.round((joinPreview.occupied / Math.max(1, joinPreview.capacity)) * 100))}%` }}
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void handleJoinGroup()}
+                    disabled={joinBusy || joinPreview.full}
+                    className="inline-flex items-center justify-center gap-2 min-h-[46px] rounded-full bg-[#1DB954] px-7 py-2.5 text-sm font-extrabold text-black transition-colors hover:bg-[#15803D] hover:text-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    {joinBusy ? 'Joining…' : joinPreview.full ? 'Group Is Full' : 'Join This Group'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setJoinPreview(null)}
+                    className="inline-flex items-center min-h-[46px] rounded-full border border-white/15 px-5 py-2.5 text-xs font-semibold text-[#B3B3B3] hover:text-white hover:border-white/30 transition-colors cursor-pointer"
+                  >
+                    Not my group
+                  </button>
+                </div>
+                <p className="text-[11px] text-[#6B6B6B]">
+                  Joining reserves a seat with payment marked as pending — your group admin will
+                  confirm payment before streaming begins.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Your groups */}
+          <div className="rounded-2xl border border-white/10 bg-[#181818] p-6 sm:p-8 space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-bold text-white">Your Groups</h2>
+                <p className="text-xs text-[#B3B3B3]">Live from your account — the same records your admins see.</p>
+              </div>
+              <button
+                type="button"
+                onClick={refreshMyGroups}
+                aria-label="Refresh your groups"
+                title="Refresh your groups"
+                className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 text-[#B3B3B3] hover:text-white hover:border-white/30 transition-colors cursor-pointer"
+              >
+                <RefreshCw className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
+
+            {myGroups.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-white/15 bg-[#121212] px-4 py-8 text-center text-sm text-[#B3B3B3]">
+                You are not in any groups yet. Enter an invite code above to join one.
+              </p>
+            ) : (
+              <ul className="space-y-3">
+                {myGroups.map((g) => (
+                  <li key={g.id} className="rounded-xl border border-white/10 bg-[#121212] p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-mono text-xs font-extrabold text-[#1DB954] tabular-nums">Code {g.groupCode}</p>
+                        <p className="mt-1 text-sm font-bold text-white">{g.groupName}</p>
+                        <p className="text-xs text-[#B3B3B3]">{g.planName}{g.isLeader ? ' · Group Leader' : ''}</p>
+                        {g.homeAddress && (
+                          <p className="mt-1.5 flex items-start gap-1.5 text-[11px] text-[#B3B3B3] break-words">
+                            <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#1DB954]" aria-hidden="true" />
+                            {g.homeAddress}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex flex-col items-end gap-2">
+                        <span
+                          className={`rounded-full px-2 py-1 text-[10px] font-extrabold uppercase tracking-wider ${
+                            g.paymentStatus === 'Paid'
+                              ? 'bg-[#1DB954]/10 text-[#1DB954]'
+                              : 'bg-amber-400/10 text-amber-400'
+                          }`}
+                        >
+                          {g.paymentStatus}
+                        </span>
+                        {g.inviteLink && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void handleCopyText(g.inviteLink ?? '', () => {
+                                setCopiedInviteLink(true);
+                                window.setTimeout(() => setCopiedInviteLink(false), 2000);
+                              })
+                            }
+                            className="inline-flex items-center gap-1.5 min-h-[34px] rounded-full border border-white/15 px-3 py-1.5 text-[11px] font-semibold text-white hover:border-[#1DB954] hover:text-[#1DB954] transition-colors cursor-pointer"
+                          >
+                            {copiedInviteLink ? (
+                              <>
+                                <Check className="h-3 w-3 text-[#1DB954]" aria-hidden="true" />
+                                Copied
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="h-3 w-3" aria-hidden="true" />
+                                Copy invite link
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
         </div>
@@ -1327,6 +1623,17 @@ export function ProfileView({
           <div className="flex flex-col gap-6 rounded-2xl border border-white/10 bg-[#121212] p-6 sm:p-8">
             <div className="flex flex-wrap items-center justify-end gap-4">
               <div className="flex flex-wrap items-center gap-2.5 sm:gap-3">
+                {/* Join with Code Icon Button */}
+                <button
+                  type="button"
+                  onClick={() => openSubPage('join')}
+                  aria-label="Join a group with an invite code"
+                  title="Join with Code"
+                  className="relative inline-flex h-11 w-11 items-center justify-center rounded-full border border-[#1DB954]/40 bg-[#181818] text-[#1DB954] transition-colors hover:border-[#1DB954] hover:bg-[#1DB954]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1DB954] cursor-pointer shrink-0"
+                >
+                  <Ticket className="h-5 w-5" aria-hidden="true" />
+                </button>
+
                 {/* Invite Somebody Icon Button */}
                 <button
                   type="button"

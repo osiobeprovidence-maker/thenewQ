@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Ticket, X } from 'lucide-react';
 import { AdminView } from './components/AdminView';
 import { AuthModal } from './components/AuthModal';
 import { FaqSection } from './components/FaqSection';
@@ -19,13 +20,22 @@ import {
   DEFAULT_SUPPORT_PERMISSIONS,
   FAQ_ITEMS,
   INITIAL_PLATFORM_TRANSACTIONS,
-  INITIAL_SUBSCRIPTION_GROUPS,
   SUBSCRIPTION_PLANS,
   addMonthsToIso,
   formatAmount,
   formatPlanPrice,
-  generateGroupCode,
 } from './data/subscriptions';
+import {
+  createSubscriptionGroup,
+  deleteSubscriptionGroup,
+  fetchAdminGroups,
+  joinGroupByCode,
+  previewGroupByCode,
+  removeGroupMember,
+  setGroupLeader,
+  setMembershipPayment,
+  updateSubscriptionGroup,
+} from './lib/groupService';
 import type {
   ActiveSubscription,
   AppView,
@@ -69,13 +79,10 @@ function generateReferenceId(prefix = 'JTQ'): string {
   return `${prefix}-${randomCode}`;
 }
 
-function createUniqueGroupCode(existingGroups: SubscriptionGroup[]): string {
-  const used = new Set(existingGroups.map((g) => g.groupCode));
-  let candidate = generateGroupCode();
-  while (used.has(candidate)) {
-    candidate = generateGroupCode();
-  }
-  return candidate;
+/** Ephemeral code for client-side demo groups only — never persisted. */
+function ephemeralGroupCode(): string {
+  const randomCode = Math.floor(1000 + Math.random() * 9000);
+  return `GFT-${randomCode}`;
 }
 
 function buildAdminInboxMessage({
@@ -134,6 +141,13 @@ export default function App() {
   } = useAuth();
   const [currentView, setCurrentView] = useState<AppView>('landing');
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [joinBannerDismissed, setJoinBannerDismissed] = useState(false);
+  // Read once — the ?join= param drives the invite-landing banner + join flow prefill
+  const joinCodeFromUrl = (() => {
+    const raw = new URLSearchParams(window.location.search).get('join');
+    return raw ? raw.trim().toUpperCase() : null;
+  })();
+  const showJoinBanner = Boolean(joinCodeFromUrl) && !joinBannerDismissed;
   const [supportPermissions, setSupportPermissions] = useState<SupportPermissions>(
     DEFAULT_SUPPORT_PERMISSIONS
   );
@@ -152,7 +166,7 @@ export default function App() {
   const canOpenStaffConsole =
     staffAccess !== null || hasPendingStaffInvite || designatedSuperAdminAvailable;
   const [plans, setPlans] = useState<SubscriptionPlan[]>(SUBSCRIPTION_PLANS);
-  const [groups, setGroups] = useState<SubscriptionGroup[]>(INITIAL_SUBSCRIPTION_GROUPS);
+  const [groups, setGroups] = useState<SubscriptionGroup[]>([]);
   const [platformTransactions, setPlatformTransactions] = useState<PlatformTransaction[]>(
     INITIAL_PLATFORM_TRANSACTIONS
   );
@@ -175,6 +189,25 @@ export default function App() {
   // Track which subscription plans came from a successful live Supabase fetch.
   // A plan is only “live” if the backend supplied it and its id is a UUID.
   const [livePlanIds, setLivePlanIds] = useState<Set<string>>(new Set());
+
+  // Reload groups from the database (admin + member views stay consistent)
+  const refreshGroups = () => {
+    fetchAdminGroups()
+      .then((liveGroups) => setGroups(liveGroups))
+      .catch((err) => console.warn('Could not load groups:', err));
+  };
+
+  useEffect(() => {
+    let mounted = true;
+    fetchAdminGroups()
+      .then((liveGroups) => {
+        if (mounted) setGroups(liveGroups);
+      })
+      .catch((err) => console.warn('Could not load groups:', err));
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   // Synchronize live subscription plans from Supabase
   useEffect(() => {
@@ -300,7 +333,7 @@ export default function App() {
       return updatedGroup;
     }
 
-    const newGroupCode = createUniqueGroupCode(groups);
+    const newGroupCode = ephemeralGroupCode();
     const planGroupCount = groups.filter((g) => g.planId === chosenPlan.id).length + 1;
     const newGroup: SubscriptionGroup = {
       id: `grp-${Date.now()}`,
@@ -873,121 +906,83 @@ export default function App() {
   };
 
   // ADMIN HANDLERS
-  const handleCreateGroup = ({
+  const handleCreateGroup = async ({
     groupName,
     planId,
     homeAddress,
-    inviteLink,
     maxSlots,
   }: {
     groupName: string;
     planId: string;
     homeAddress: string;
-    inviteLink: string;
     maxSlots: number;
-  }): string => {
-    const plan = plans.find((p) => p.id === planId) ?? plans[0];
-    const newGroupId = `grp-${Date.now()}`;
-    const groupCode = createUniqueGroupCode(groups);
+  }): Promise<string> => {
+    const created = await createSubscriptionGroup({ planId, groupName, maxSlots, homeAddress });
+    refreshGroups();
+    return created.id;
+  };
 
-    const created: SubscriptionGroup = {
-      id: newGroupId,
-      groupName,
-      groupCode,
-      planId: plan.id,
-      planName: plan.name,
-      homeAddress,
-      inviteLink,
-      maxSlots,
-      createdAt: new Date().toISOString(),
-      members: [],
-    };
-    setGroups((prev) => [created, ...prev]);
-    return newGroupId;
+  const handleDeleteGroup = async (groupId: string) => {
+    await deleteSubscriptionGroup(groupId);
+    refreshGroups();
   };
 
   const handleUpdateGroupDetails = (
     groupId: string,
-    payload: { groupName: string; homeAddress: string; inviteLink: string }
+    payload: { groupName: string; homeAddress: string; capacity?: number }
   ) => {
-    setGroups((prev) =>
-      prev.map((grp) =>
-        grp.id === groupId
-          ? {
-              ...grp,
-              groupName: payload.groupName,
-              homeAddress: payload.homeAddress,
-              inviteLink: payload.inviteLink,
-            }
-          : grp
-      )
-    );
+    const trimmed = {
+      groupName: payload.groupName,
+      homeAddress: payload.homeAddress,
+      capacity: payload.capacity,
+    };
+    void updateSubscriptionGroup(groupId, {
+      groupName: trimmed.groupName,
+      homeAddress: trimmed.homeAddress,
+      capacity: trimmed.capacity,
+    })
+      .then(() => refreshGroups())
+      .catch((err) => console.warn('Could not update group:', err));
     setActiveSubscriptions((prev) =>
       prev.map((sub) =>
-        sub.groupId === groupId ? { ...sub, groupName: payload.groupName } : sub
+        sub.groupId === groupId ? { ...sub, groupName: trimmed.groupName } : sub
       )
     );
   };
 
   const handleDispatchGroupToInbox = (groupId: string): number => {
+    // Share the real invite link — copied to the clipboard for the admin to forward.
     const grp = groups.find((g) => g.id === groupId);
     if (!grp) return 0;
-
-    const matchingSubs = activeSubscriptions.filter(
-      (sub) => sub.groupId === groupId && sub.status !== 'cancelled'
-    );
-    if (matchingSubs.length === 0) return 0;
-
-    const nowIso = new Date().toISOString();
-    const newMessages = matchingSubs.map((sub) =>
-      buildAdminInboxMessage({
-        referenceId: sub.referenceId,
-        planName: grp.planName,
-        receivedAt: nowIso,
-        recipientName: sub.payerType === 'recipient' ? sub.recipientName : undefined,
-        groupCode: grp.groupCode,
-        groupName: grp.groupName,
-        inviteLink: grp.inviteLink,
-        homeAddress: grp.homeAddress,
-      })
-    );
-    setInboxMessages((prev) => [...newMessages, ...prev]);
-    return newMessages.length;
+    const link = grp.inviteLink ?? '';
+    if (!link) return 0;
+    try {
+      void navigator.clipboard?.writeText(link);
+    } catch {
+      // Clipboard may be blocked — the link is still visible in the group details
+    }
+    return grp.members.filter((m) => m.paymentStatus !== 'Cancelled').length;
   };
 
   const handleSetGroupLeader = (groupId: string, memberId: string) => {
-    setGroups((prev) =>
-      prev.map((grp) =>
-        grp.id !== groupId
-          ? grp
-          : {
-              ...grp,
-              members: grp.members.map((m) => ({
-                ...m,
-                isLeader: m.id === memberId,
-              })),
-            }
-      )
-    );
+    void setGroupLeader(groupId, memberId)
+      .then(() => refreshGroups())
+      .catch((err: unknown) => {
+        console.warn('Could not set leader:', err);
+        window.alert('Could not set the group leader. Check permissions or try again.');
+      });
   };
 
   const handleToggleMemberPaymentStatus = (groupId: string, memberId: string) => {
-    setGroups((prev) =>
-      prev.map((grp) =>
-        grp.id !== groupId
-          ? grp
-          : {
-              ...grp,
-              members: grp.members.map((m) => {
-                if (m.id !== memberId || m.paymentStatus === 'Cancelled') return m;
-                return {
-                  ...m,
-                  paymentStatus: m.paymentStatus === 'Paid' ? 'Unpaid' : 'Paid',
-                };
-              }),
-            }
-      )
-    );
+    const targetGroup = groups.find((g) => g.id === groupId);
+    const target = targetGroup?.members.find((m) => m.id === memberId);
+    if (!target || target.paymentStatus === 'Cancelled') return;
+    void setMembershipPayment(memberId, target.paymentStatus !== 'Paid')
+      .then(() => refreshGroups())
+      .catch((err: unknown) => {
+        console.warn('Could not toggle payment status:', err);
+        window.alert('Could not update the payment status. Check permissions or try again.');
+      });
   };
 
   const handleCollectMemberPayment = (
@@ -1002,29 +997,12 @@ export default function App() {
     const groupPlan = plans.find((p) => p.id === targetGroup.planId) ?? plans[0];
     const nowIso = new Date().toISOString();
 
-    setGroups((prev) =>
-      prev.map((grp) =>
-        grp.id !== groupId
-          ? grp
-          : {
-              ...grp,
-              members: grp.members.map((m) =>
-                m.id !== memberId
-                  ? m
-                  : {
-                      ...m,
-                      paymentStatus: 'Paid',
-                      amountPaid: (m.amountPaid ?? 0) + groupPlan.priceMonthly,
-                      collectedBySupport: collectorRole === 'support',
-                      contacted: true,
-                      contactedAt: m.contactedAt ?? nowIso,
-                      contactedBy:
-                        m.contactedBy ?? (collectorRole === 'support' ? 'Customer Care' : 'Admin'),
-                    }
-              ),
-            }
-      )
-    );
+    void setMembershipPayment(memberId, true)
+      .then(() => refreshGroups())
+      .catch((err: unknown) => {
+        console.warn('Could not collect payment:', err);
+        window.alert('Could not mark this member as paid. Check permissions or try again.');
+      });
 
     setPlatformTransactions((prev) => [
       {
@@ -1075,6 +1053,13 @@ export default function App() {
   const handleRemoveGroupMember = (groupId: string, memberId: string) => {
     const targetGroup = groups.find((g) => g.id === groupId);
     const targetMember = targetGroup?.members.find((m) => m.id === memberId);
+
+    void removeGroupMember(memberId)
+      .then(() => refreshGroups())
+      .catch((err: unknown) => {
+        console.warn('Could not remove member:', err);
+        window.alert('Could not remove member. Check permissions or try again.');
+      });
 
     setGroups((prev) =>
       prev.map((grp) => {
@@ -1186,6 +1171,40 @@ export default function App() {
         onOpenAuthModal={() => setAuthModalOpen(true)}
       />
 
+      {/* Invite landing banner — visible when arriving via ?join=GFT-XXXX */}
+      {showJoinBanner && (
+        <div className="border-b border-[#1DB954]/30 bg-[#0d2010]">
+          <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
+            <div className="flex items-center gap-3 text-sm text-white">
+              <Ticket className="h-5 w-5 text-[#1DB954] shrink-0" aria-hidden="true" />
+              <span>
+                You were invited to group{' '}
+                <strong className="font-mono text-[#1DB954]">{joinCodeFromUrl}</strong>.{' '}
+                {currentUser ? 'Open your profile to claim a seat.' : 'Sign in — your seat is waiting.'}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => (currentUser ? openProfileView() : setAuthModalOpen(true))}
+                className="inline-flex items-center min-h-[36px] rounded-full bg-[#1DB954] px-4 py-1.5 text-xs font-bold text-black transition-colors hover:bg-[#15803D] hover:text-white cursor-pointer"
+              >
+                {currentUser ? 'Open join flow' : 'Sign In'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setJoinBannerDismissed(true)}
+                aria-label="Dismiss invitation banner"
+                title="Dismiss"
+                className="flex h-9 w-9 items-center justify-center rounded-full text-[#B3B3B3] hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <main className="flex-1">
         {currentView === 'landing' && (
           <>
@@ -1240,6 +1259,7 @@ export default function App() {
             onRequestSignIn={() => setAuthModalOpen(true)}
             onUpdateSupportPermissions={setSupportPermissions}
             onCreateGroup={handleCreateGroup}
+            onDeleteGroup={handleDeleteGroup}
             onUpdateGroupDetails={handleUpdateGroupDetails}
             onDispatchGroupToInbox={handleDispatchGroupToInbox}
             onSetGroupLeader={handleSetGroupLeader}

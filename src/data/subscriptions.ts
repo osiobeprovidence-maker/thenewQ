@@ -3,7 +3,6 @@ import type {
   FaqItem,
   GoogleStaffAccount,
   PlatformTransaction,
-  SubscriptionGroup,
   SubscriptionPlan,
   SupportPermissions,
 } from '../types/subscription';
@@ -144,48 +143,6 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
   },
 ];
 
-export const INITIAL_SUBSCRIPTION_GROUPS: SubscriptionGroup[] = [
-  {
-    id: 'grp-spotify-01',
-    groupName: 'Spotify Queue Group 01',
-    groupCode: 'GFT-7471',
-    planId: 'spotify-premium',
-    planName: 'Spotify Premium',
-    homeAddress: '14 Admiralty Way, Lekki Phase 1, Lagos (Demo Address)',
-    inviteLink: 'https://jointhequeue.demo/slot-invite/gft-7471',
-    maxSlots: 6,
-    createdAt: '2026-11-01T10:00:00.000Z',
-    members: [
-      {
-        id: 'mem-tunde',
-        fullName: 'Tunde Bello',
-        email: 'tunde.bello@example.com',
-        whatsappNumber: '+234 803 111 2200',
-        referenceId: 'GFT-1001',
-        isLeader: true,
-        paymentStatus: 'Paid',
-        joinedAt: '2026-11-01T10:05:00.000Z',
-        payerLabel: 'Self',
-        amountPaid: 800,
-        contacted: false,
-      },
-      {
-        id: 'mem-joy',
-        fullName: 'Joy Emeka',
-        email: 'joy.emeka@example.com',
-        whatsappNumber: '+234 809 444 5511',
-        referenceId: 'GFT-3012',
-        isLeader: false,
-        paymentStatus: 'Unpaid',
-        joinedAt: '2026-11-10T14:20:00.000Z',
-        payerLabel: 'Self',
-        amountPaid: 0,
-        contacted: false,
-      },
-    ],
-  },
-];
-
 export const INITIAL_PLATFORM_TRANSACTIONS: PlatformTransaction[] = [
   {
     id: 'tx-seed-tunde',
@@ -281,10 +238,7 @@ export function formatDisplayDate(isoString: string): string {
   });
 }
 
-export function generateGroupCode(): string {
-  const code = Math.floor(1000 + Math.random() * 9000);
-  return `GFT-${code}`;
-}
+
 
 export function normalizePhoneNumber(phone: string): string {
   const digits = phone.replace(/[^\d]/g, '');
