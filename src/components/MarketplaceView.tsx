@@ -133,6 +133,7 @@ export function MarketplaceView({ onBackToProfile }: { onBackToProfile: () => vo
     useState<MarketplaceSubscription | null>(null);
   const [demoActions, setDemoActions] = useState<Record<string, DemoAction>>({});
   const [notice, setNotice] = useState<string | null>(null);
+  const listingsCount = MARKETPLACE_SUBSCRIPTIONS.length;
 
   useEffect(() => {
     if (!selectedSubscription) return;
@@ -194,6 +195,55 @@ export function MarketplaceView({ onBackToProfile }: { onBackToProfile: () => vo
           : 'Express Interest'
     : '';
 
+  // Coming Soon branch — used when there are no admin-seeded listings yet.
+  if (listingsCount === 0) {
+    return (
+      <div className="mx-auto max-w-4xl px-4 py-10 sm:py-16 lg:px-8">
+        <div className="mb-7 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-[#121212] px-4 py-3.5 sm:px-6">
+          <button
+            type="button"
+            onClick={onBackToProfile}
+            className="inline-flex min-h-[40px] items-center gap-2 text-sm font-semibold text-white transition-colors hover:text-[#1DB954]"
+          >
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+            <span>Back to Settings</span>
+          </button>
+          <span className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[#1DB954]">
+            <UsersRound className="h-4 w-4" aria-hidden="true" />
+            Marketplace
+          </span>
+        </div>
+
+        <section
+          className="rounded-2xl border border-white/10 bg-[#181818] p-6 sm:p-10 text-center"
+          aria-labelledby="marketplace-coming-soon-title"
+        >
+          <div
+            aria-hidden="true"
+            className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl border border-[#1DB954]/30 bg-[#1DB954]/10 text-[#1DB954]"
+          >
+            <UsersRound className="h-10 w-10" />
+          </div>
+          <p className="mt-6 text-xs font-semibold uppercase tracking-wider text-[#1DB954]">
+            Marketplace
+          </p>
+          <h1
+            id="marketplace-coming-soon-title"
+            className="mt-2 text-2xl font-extrabold tracking-tight text-white sm:text-4xl"
+          >
+            Marketplace Coming Soon
+          </h1>
+          <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-[#B3B3B3] sm:text-base">
+            Premium plans from verified providers will appear here once the team lists them. No items are available yet — check back shortly.
+          </p>
+          <p className="mt-6 text-xs text-[#B3B3B3]">
+            We only show listings that have been explicitly added and approved.
+          </p>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-14 lg:px-8">
       <div className="mb-7 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-[#121212] px-4 py-3.5 sm:px-6">
@@ -203,7 +253,7 @@ export function MarketplaceView({ onBackToProfile }: { onBackToProfile: () => vo
           className="inline-flex min-h-[40px] items-center gap-2 text-sm font-semibold text-white transition-colors hover:text-[#1DB954]"
         >
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-          <span>Back to Profile</span>
+          <span>Back to Settings</span>
         </button>
         <span className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[#1DB954]">
           <UsersRound className="h-4 w-4" aria-hidden="true" />

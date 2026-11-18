@@ -1,11 +1,12 @@
 import { useState, type FormEvent } from 'react';
-import { ArrowLeft, CheckCircle2, Eye, EyeOff, KeyRound, Phone, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Eye, EyeOff, KeyRound, Phone, ShieldCheck, UsersRound } from 'lucide-react';
 
 interface SettingsViewProps {
   phoneNumber: string;
   passwordConfigured: boolean;
   onBack: () => void;
   onSetPassword: (password: string) => void;
+  onOpenMarketplace: () => void;
   onChangePassword: (currentPassword: string, newPassword: string) => boolean;
 }
 
@@ -18,6 +19,7 @@ export function SettingsView({
   passwordConfigured,
   onBack,
   onSetPassword,
+  onOpenMarketplace,
   onChangePassword,
 }: SettingsViewProps) {
   const [passwordMode, setPasswordMode] = useState<PasswordMode | null>(null);
@@ -137,6 +139,24 @@ export function SettingsView({
             </p>
           </div>
         </div>
+
+        <button
+          type="button"
+          onClick={onOpenMarketplace}
+          className="mt-5 flex w-full items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#121212] px-4 py-3 text-left transition-colors hover:border-[#1DB954] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1DB954]"
+          aria-label="Open subscription marketplace"
+        >
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#1DB954]/30 bg-[#1DB954]/10 text-[#1DB954]">
+              <UsersRound className="h-4 w-4" aria-hidden="true" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-white">Marketplace</p>
+              <p className="mt-0.5 break-words text-xs text-[#B3B3B3]">Coming soon · verified subscription listings from Q</p>
+            </div>
+          </div>
+          <ArrowLeft className="h-4 w-4 shrink-0 rotate-180 text-[#B3B3B3]" aria-hidden="true" />
+        </button>
 
         <div className="mt-5 grid gap-4 sm:grid-cols-2">
           <div className="rounded-xl border border-white/10 bg-[#121212] p-4">

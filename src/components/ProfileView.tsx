@@ -24,7 +24,6 @@ import {
   UserCheck,
   UserPlus,
   Users,
-  UsersRound,
   X,
   XCircle,
 } from 'lucide-react';
@@ -688,6 +687,7 @@ export function ProfileView({
           passwordConfigured={mockPassword !== null}
           onBack={() => openSubPage('overview')}
           onSetPassword={setMockPassword}
+          onOpenMarketplace={() => openSubPage('marketplace')}
           onChangePassword={(currentPassword, newPassword) => {
             if (mockPassword !== currentPassword) return false;
             setMockPassword(newPassword);
@@ -697,7 +697,7 @@ export function ProfileView({
       )}
 
       {subView === 'marketplace' && (
-        <MarketplaceView onBackToProfile={() => openSubPage('overview')} />
+        <MarketplaceView onBackToProfile={() => openSubPage('settings')} />
       )}
 
       {/* SUB-VIEW 2: DEDICATED INVITE SOMEBODY PAGE (MATCHING INBOX DESIGN) */}
@@ -1397,16 +1397,6 @@ export function ProfileView({
                   )}
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => openSubPage('settings')}
-                  aria-label="Open account settings"
-                  title="Settings"
-                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/15 bg-[#181818] text-white transition-colors hover:border-[#1DB954] hover:text-[#1DB954] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1DB954] cursor-pointer"
-                >
-                  <Settings className="h-5 w-5" aria-hidden="true" />
-                </button>
-
                 {/* Staff console — hidden destination; visible to signed-in users only */}
                 {onOpenAdminConsole && (
                   <button
@@ -1422,12 +1412,12 @@ export function ProfileView({
 
                 <button
                   type="button"
-                  onClick={() => openSubPage('marketplace')}
-                  aria-label="Open subscription marketplace"
-                  title="Marketplace"
+                  onClick={() => openSubPage('settings')}
+                  aria-label="Open account settings"
+                  title="Settings"
                   className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/15 bg-[#181818] text-white transition-colors hover:border-[#1DB954] hover:text-[#1DB954] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1DB954] cursor-pointer"
                 >
-                  <UsersRound className="h-5 w-5" aria-hidden="true" />
+                  <Settings className="h-5 w-5" aria-hidden="true" />
                 </button>
 
                 <button
