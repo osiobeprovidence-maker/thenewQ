@@ -160,6 +160,9 @@ export async function createSubscriptionProduct(args: {
     p_category: args.category || 'Music',
     p_description: args.description || '',
     p_currency: args.currency || 'NGN',
+    p_icon: 'music-disc',
+    p_eligibility_note: null,
+    p_highlights: null,
   });
   if (error) throw new Error(error.message);
 }
