@@ -132,14 +132,14 @@ export function PlansSection({
           </div>
         </div>
 
-        {/* Optional session confirmation banner if user already completed a demo order */}
+        {/* Show the verified order returned by the payment provider. */}
         {recentOrder && (
           <div className="mt-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 rounded-2xl border border-[#1DB954]/40 bg-[#181818] px-5 py-4">
             <div className="flex items-start sm:items-center gap-3">
               <CheckCircle2 className="h-5 w-5 text-[#1DB954] shrink-0 mt-0.5 sm:mt-0" aria-hidden="true" />
               <div className="text-sm">
                 <span className="font-semibold text-white">
-                  Demo order {recentOrder.referenceId} confirmed
+                  Payment {recentOrder.referenceId} confirmed
                 </span>
                 <span className="text-[#B3B3B3]">
                   {' '}

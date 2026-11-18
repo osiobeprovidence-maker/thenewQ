@@ -194,7 +194,7 @@ export function Footer({ onNavigateSection, onOpenInfoModal }: FooterProps) {
         </div>
 
         <div className="mt-10 pt-6 border-t border-white/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-[#B3B3B3]">
-          <p>&copy; {currentYear} {BRAND_INFO.name}. Frontend demonstration prototype.</p>
+          <p>&copy; {currentYear} {BRAND_INFO.name}.</p>
           <p>Built for smooth subscription-slot discovery.</p>
         </div>
       </div>

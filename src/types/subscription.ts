@@ -93,7 +93,7 @@ export interface PlatformTransaction {
     | 'bachs';
   amount: number;
   currencySymbol: string;
-  status: 'Confirmed (Demo)' | 'Waitlist Recorded' | 'Confirmed' | 'Pending' | 'Failed' | 'Refunded';
+  status: 'Waitlist Recorded' | 'Confirmed' | 'Pending' | 'Failed' | 'Refunded';
 }
 
 export interface SubscriptionGroup {
@@ -198,7 +198,7 @@ export interface PaymentRecord {
   currencySymbol: string;
   kind: 'initial' | 'renewal' | 'gift';
   recipientName?: string;
-  status: 'Confirmed (Demo)' | 'Waitlist Recorded' | 'Confirmed' | 'Pending' | 'Failed' | 'Refunded';
+  status: 'Waitlist Recorded' | 'Confirmed' | 'Pending' | 'Failed' | 'Refunded';
 }
 
 export interface InvitedPerson {
@@ -207,7 +207,7 @@ export interface InvitedPerson {
   contact: string;
   inviteCode: string;
   sentAt: string;
-  status: 'Invite Sent (Demo)';
+  status: 'Invite link ready';
 }
 
 export interface SponsoredSlot {

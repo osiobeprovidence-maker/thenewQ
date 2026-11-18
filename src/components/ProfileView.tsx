@@ -70,19 +70,9 @@ interface ProfileViewProps {
   staffAccess?: 'superAdmin' | 'admin' | 'support' | null;
   /** Designated bootstrap account that may claim super admin access. */
   designatedSuperAdminAvailable?: boolean;
-  onTriggerNextPayment: (subscriptionId: string, months: BillingDurationMonths) => void;
   onCancelSubscriptionSlot: (subscriptionId: string) => void;
   onMarkInboxRead: (messageId: string, isRead: boolean) => void;
-  onSimulateAdminMessage: (subscriptionId: string) => void;
   onSendInvite: (name: string, contact: string) => void;
-  onPayForSomebody: (payload: {
-    planId: string;
-    months: BillingDurationMonths;
-    recipientName: string;
-    recipientEmail: string;
-    recipientWhatsapp: string;
-    note: string;
-  }) => string;
   phoneVerified: boolean;
   onSavePhone: (phone: string) => Promise<void>;
   setupPhoneRecaptcha: (containerId: string) => RecaptchaVerifier;
@@ -101,24 +91,6 @@ type ProfileSubView =
   | 'marketplace'
   | 'join';
 
-interface PendingConfirmation {
-  mode: 'renewal' | 'gift';
-  title: string;
-  planName: string;
-  durationLabel: string;
-  months: BillingDurationMonths;
-  amount: number;
-  currencySymbol: string;
-  subscriptionId?: string;
-  currentRenewalDate?: string;
-  newRenewalDate?: string;
-  recipientName?: string;
-  recipientEmail?: string;
-  recipientWhatsapp?: string;
-  planId?: string;
-  note?: string;
-}
-
 export function ProfileView({
   profile,
   plans,
@@ -132,12 +104,9 @@ export function ProfileView({
   onOpenAdminConsole,
   staffAccess,
   designatedSuperAdminAvailable,
-  onTriggerNextPayment,
   onCancelSubscriptionSlot,
   onMarkInboxRead,
-  onSimulateAdminMessage,
   onSendInvite,
-  onPayForSomebody,
   phoneVerified,
   onSavePhone,
   setupPhoneRecaptcha,
@@ -228,11 +197,7 @@ export function ProfileView({
   const [inviteContact, setInviteContact] = useState('');
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [inviteSuccessMsg, setInviteSuccessMsg] = useState<string | null>(null);
-
-  // Pay for somebody form state
-  const [giftPlanId, setGiftPlanId] = useState<string>(
-    plans.find((p) => p.status === 'available')?.id ?? plans[0].id
-  );
+  const [giftPlanId, setGiftPlanId] = useState<string>(plans.find((p) => p.status === 'available')?.id ?? plans[0]?.id ?? '');
   const [giftDuration, setGiftDuration] = useState<BillingDurationMonths>(1);
   const [recipientName, setRecipientName] = useState('');
   const [recipientEmail, setRecipientEmail] = useState('');
@@ -240,10 +205,8 @@ export function ProfileView({
   const [giftNote, setGiftNote] = useState('');
   const [giftError, setGiftError] = useState<string | null>(null);
 
-  // Payment & Cancel confirmation modal & banner feedback
-  const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation | null>(null);
+  // Cancel confirmation modal & banner feedback
   const [pendingCancelSub, setPendingCancelSub] = useState<ActiveSubscription | null>(null);
-  const [isConfirming, setIsConfirming] = useState(false);
   const [profileNotice, setProfileNotice] = useState<string | null>(null);
 
   useEffect(() => {
@@ -259,16 +222,15 @@ export function ProfileView({
   }, [inboxMessages, selectedInboxId]);
 
   useEffect(() => {
-    if (!pendingConfirmation && !pendingCancelSub) return;
+    if (!pendingCancelSub) return;
     const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !isConfirming) {
-        setPendingConfirmation(null);
+      if (e.key === 'Escape') {
         setPendingCancelSub(null);
       }
     };
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
-  }, [pendingConfirmation, pendingCancelSub, isConfirming]);
+  }, [pendingCancelSub]);
 
   if (!profile) {
     return (
@@ -282,7 +244,7 @@ export function ProfileView({
               Your Profile Is Ready Once You Join a Slot
             </h1>
             <p className="mt-3 text-sm sm:text-base text-[#B3B3B3] leading-relaxed">
-              Choose a subscription plan and confirm your simulated order to view your joined slot, inbox messages, payment history, multi-month renewal options, and invite tools here.
+              Your profile will show subscription details and payment history after your payment is confirmed.
             </p>
             <div className="mt-7 flex flex-col sm:flex-row items-center justify-center gap-3">
               <button
@@ -319,12 +281,19 @@ export function ProfileView({
   const unreadCount = inboxMessages.filter((m) => !m.isRead).length;
 
   const giftPlan = plans.find((p) => p.id === giftPlanId) ?? plans[0];
-  const giftDurationObj =
-    BILLING_DURATIONS.find((d) => d.months === giftDuration) ?? BILLING_DURATIONS[0];
-  const giftTotal = giftPlan.priceMonthly * giftDuration;
+  const giftDurationObj = BILLING_DURATIONS.find((d) => d.months === giftDuration) ?? BILLING_DURATIONS[0];
+  const giftTotal = giftPlan ? giftPlan.priceMonthly * giftDuration : 0;
 
-  const inviteUrl = `https://jointhequeue.demo/invite/${profile.inviteCode}`;
-  const totalSpent = paymentHistory.reduce((sum, item) => sum + item.amount, 0);
+  const inviteUrl = `https://jointhenewq.vercel.app/invite/${profile.inviteCode}`;
+  const paidTotals = paymentHistory
+    .filter((item) => item.status === 'Confirmed')
+    .reduce((totals, item) => {
+      totals.set(item.currencySymbol, (totals.get(item.currencySymbol) ?? 0) + item.amount);
+      return totals;
+    }, new Map<string, number>());
+  const totalPaidLabel = paidTotals.size
+    ? [...paidTotals.entries()].map(([currency, amount]) => formatAmount(amount, currency)).join(' · ')
+    : formatAmount(0, '₦');
 
   const filteredHistory = paymentHistory.filter((item) => {
     if (historyFilter === 'renewal') return item.kind === 'renewal' || item.kind === 'initial';
@@ -407,110 +376,11 @@ export function ProfileView({
 
   const handleGiftSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const trimmedName = recipientName.trim();
-    const trimmedEmail = recipientEmail.trim();
-    const digitsOnly = recipientWhatsapp.replace(/[^\d]/g, '');
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-    if (trimmedName.length < 2) {
-      setGiftError('Please enter the recipient’s full name.');
-      return;
-    }
-    if (!emailRegex.test(trimmedEmail)) {
-      setGiftError('Please enter a valid recipient email address.');
-      return;
-    }
-    if (digitsOnly.length < 10 || digitsOnly.length > 15) {
-      setGiftError('Please enter a valid recipient WhatsApp number (10–15 digits).');
-      return;
-    }
-
-    setGiftError(null);
-    setPendingConfirmation({
-      mode: 'gift',
-      title: `Pay for ${trimmedName}`,
-      planName: giftPlan.name,
-      durationLabel: giftDurationObj.label,
-      months: giftDuration,
-      amount: giftTotal,
-      currencySymbol: giftPlan.currencySymbol,
-      recipientName: trimmedName,
-      recipientEmail: trimmedEmail,
-      recipientWhatsapp: recipientWhatsapp.trim(),
-      planId: giftPlan.id,
-      note: giftNote.trim(),
-    });
+    setGiftError('Secure payment for another person is not available yet. No payment was processed or recorded.');
   };
 
-  const handleOpenRenewalConfirmation = () => {
-    if (!activeSub) return;
-    setPendingConfirmation({
-      mode: 'renewal',
-      title:
-        activeSub.payerType === 'recipient' && activeSub.recipientName
-          ? `Renew Slot for ${activeSub.recipientName}`
-          : 'Confirm Next Payment',
-      planName: activeSub.plan.name,
-      durationLabel: selectedDurationObj.label,
-      months: selectedDuration,
-      amount: renewalTotal,
-      currencySymbol: activeSub.plan.currencySymbol,
-      subscriptionId: activeSub.id,
-      currentRenewalDate: formatDisplayDate(activeSub.nextRenewalDate),
-      newRenewalDate: formatDisplayDate(previewNewRenewalDate),
-      recipientName: activeSub.recipientName,
-    });
-  };
-
-  const handleConfirmPendingPayment = () => {
-    if (!pendingConfirmation || isConfirming) return;
-    setIsConfirming(true);
-
-    window.setTimeout(() => {
-      if (pendingConfirmation.mode === 'renewal' && pendingConfirmation.subscriptionId) {
-        onTriggerNextPayment(pendingConfirmation.subscriptionId, pendingConfirmation.months);
-        const ownerSuffix = pendingConfirmation.recipientName
-          ? ` for ${pendingConfirmation.recipientName}`
-          : '';
-        setSubView('overview');
-        setProfileNotice(
-          `Simulated ${pendingConfirmation.durationLabel} renewal (${formatAmount(
-            pendingConfirmation.amount,
-            pendingConfirmation.currencySymbol
-          )}) recorded for ${pendingConfirmation.planName}${ownerSuffix}.`
-        );
-      } else if (
-        pendingConfirmation.mode === 'gift' &&
-        pendingConfirmation.planId &&
-        pendingConfirmation.recipientName &&
-        pendingConfirmation.recipientEmail &&
-        pendingConfirmation.recipientWhatsapp
-      ) {
-        const createdSubId = onPayForSomebody({
-          planId: pendingConfirmation.planId,
-          months: pendingConfirmation.months,
-          recipientName: pendingConfirmation.recipientName,
-          recipientEmail: pendingConfirmation.recipientEmail,
-          recipientWhatsapp: pendingConfirmation.recipientWhatsapp,
-          note: pendingConfirmation.note ?? '',
-        });
-        setSelectedSubId(createdSubId);
-        setSubView('overview');
-        setProfileNotice(
-          `Simulated ${pendingConfirmation.durationLabel} payment (${formatAmount(
-            pendingConfirmation.amount,
-            pendingConfirmation.currencySymbol
-          )}) recorded for ${pendingConfirmation.recipientName}. Manage their renewal below.`
-        );
-        setRecipientName('');
-        setRecipientEmail('');
-        setRecipientWhatsapp('');
-        setGiftNote('');
-      }
-
-      setIsConfirming(false);
-      setPendingConfirmation(null);
-    }, 400);
+  const explainRenewalUnavailable = () => {
+    setProfileNotice('Secure renewal checkout is not available yet. No payment has been taken or recorded. Please contact the admin for renewal assistance.');
   };
 
   const handleConfirmCancelSlot = () => {
@@ -544,16 +414,6 @@ export function ProfileView({
               <span>Back to Profile</span>
             </button>
 
-            {activeSub && (
-              <button
-                type="button"
-                onClick={() => onSimulateAdminMessage(activeSub.id)}
-                className="inline-flex items-center justify-center gap-2 min-h-[40px] rounded-full border border-white/15 bg-[#181818] px-4 py-2 text-xs font-semibold text-white hover:border-[#1DB954] hover:text-[#1DB954] transition-colors cursor-pointer whitespace-nowrap"
-              >
-                <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-                <span>Simulate Admin Update</span>
-              </button>
-            )}
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-[#181818] p-5 sm:p-8 space-y-6">
@@ -1214,7 +1074,7 @@ export function ProfileView({
       )}
 
       {/* SUB-VIEW 3: DEDICATED PAY FOR SOMEBODY PAGE (MATCHING INBOX DESIGN) */}
-      {subView === 'gift' && (
+      {subView === 'gift' && giftPlan && (
         <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 space-y-6">
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-[#121212] px-4 py-3.5 sm:px-6">
             <button
@@ -1241,7 +1101,7 @@ export function ProfileView({
                   Pay for Somebody
                 </h1>
                 <p className="text-xs sm:text-sm text-[#B3B3B3]">
-                  Sponsor a subscription slot for someone else and manage their renewals from your profile.
+                  Secure payment for another person is not available yet. No payment is processed from this form.
                 </p>
               </div>
             </div>
@@ -1365,12 +1225,11 @@ export function ProfileView({
 
               <button
                 type="submit"
-                className="inline-flex w-full sm:w-auto items-center justify-center gap-2 min-h-[48px] rounded-full bg-[#1DB954] px-7 py-3 text-sm font-bold text-black transition-colors hover:bg-[#15803D] hover:text-white cursor-pointer"
+                disabled
+                className="inline-flex w-full sm:w-auto items-center justify-center gap-2 min-h-[48px] rounded-full bg-[#1DB954] px-7 py-3 text-sm font-bold text-black opacity-60 cursor-not-allowed"
               >
                 <Gift className="h-4 w-4" aria-hidden="true" />
-                <span>
-                  Pay for Recipient · {formatAmount(giftTotal, giftPlan.currencySymbol)}
-                </span>
+                <span>Secure recipient checkout unavailable</span>
               </button>
             </form>
 
@@ -1458,7 +1317,7 @@ export function ProfileView({
                   <p className="mt-1 text-xs sm:text-sm text-[#B3B3B3]">
                     {activeSub.payerType === 'recipient' && activeSub.recipientName
                       ? `You manage billing for ${activeSub.recipientName}'s slot. Select your next payment duration below.`
-                      : 'Select how long you want to extend your subscription and trigger your next simulated payment.'}
+                      : 'Choose a renewal duration. Secure renewal checkout is not available yet.'}
                   </p>
                 </div>
               </div>
@@ -1612,7 +1471,7 @@ export function ProfileView({
                 {/* Trigger Action Footer + Cancel Slot */}
                 <div className="pt-4 border-t border-white/10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                   <div>
-                    <p className="text-xs text-[#B3B3B3]">Next payment total (Simulated)</p>
+                  <p className="text-xs text-[#B3B3B3]">Estimated renewal amount</p>
                     <p className="font-mono text-2xl font-extrabold text-[#1DB954] tabular-nums">
                       {formatAmount(renewalTotal, activeSub.plan.currencySymbol)}
                     </p>
@@ -1629,11 +1488,11 @@ export function ProfileView({
                     </button>
                     <button
                       type="button"
-                      onClick={handleOpenRenewalConfirmation}
+                      onClick={explainRenewalUnavailable}
                       className="inline-flex w-full sm:w-auto items-center justify-center gap-2 min-h-[48px] rounded-full bg-[#1DB954] px-7 py-3 text-sm sm:text-base font-bold text-black transition-all duration-150 hover:bg-[#15803D] hover:text-white active:scale-[0.99] cursor-pointer whitespace-nowrap"
                     >
                       <CreditCard className="h-4 w-4" aria-hidden="true" />
-                      <span>Trigger Next Payment</span>
+                      <span>Renewal checkout unavailable</span>
                     </button>
                   </div>
                 </div>
@@ -1803,9 +1662,9 @@ export function ProfileView({
                   </p>
                 </button>
                 <div className="rounded-xl border border-white/10 bg-[#181818] p-3.5">
-                  <p className="text-xs text-[#B3B3B3]">Total (Demo)</p>
+                  <p className="text-xs text-[#B3B3B3]">Total paid</p>
                   <p className="mt-1 font-mono text-lg sm:text-xl font-bold text-[#1DB954] tabular-nums truncate">
-                    {formatAmount(totalSpent)}
+                    {totalPaidLabel}
                   </p>
                 </div>
               </div>
@@ -1914,7 +1773,7 @@ export function ProfileView({
                             {isCancelled
                               ? 'Cancelled · No future payments'
                               : isActive
-                                ? 'Active Demo Slot'
+                                ? 'Active'
                                 : 'Waitlist Reserved'}
                           </span>
                         </span>
@@ -2013,7 +1872,7 @@ export function ProfileView({
 
             {filteredHistory.length === 0 ? (
               <div className="py-10 text-center text-sm text-[#B3B3B3]">
-                No payment records match this filter yet.
+                No confirmed payments yet. Completed payments appear here after the payment provider confirms them.
               </div>
             ) : (
               <>
@@ -2057,8 +1916,8 @@ export function ProfileView({
                             {formatAmount(item.amount, item.currencySymbol)}
                           </td>
                           <td className="py-4 pl-4 text-right whitespace-nowrap">
-                            <span className="inline-flex items-center justify-end gap-1.5 text-xs font-medium text-[#1DB954]">
-                              <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                            <span className={`inline-flex items-center justify-end gap-1.5 text-xs font-medium ${item.status === 'Confirmed' ? 'text-[#1DB954]' : 'text-[#B3B3B3]'}`}>
+                              {item.status === 'Confirmed' && <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />}
                               <span>{item.status}</span>
                             </span>
                           </td>
@@ -2106,126 +1965,6 @@ export function ProfileView({
         </div>
       )}
 
-      {/* Simulated Payment Confirmation Modal for Renewals & Pay-for-Somebody */}
-      {pendingConfirmation && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="profile-confirm-title"
-          onClick={(e) => {
-            if (e.target === e.currentTarget && !isConfirming) {
-              setPendingConfirmation(null);
-            }
-          }}
-        >
-          <div className="w-full max-w-md rounded-2xl border border-white/15 bg-[#181818] p-6 shadow-2xl space-y-5">
-            <div className="flex items-center justify-between gap-4 pb-3 border-b border-white/10">
-              <h3 id="profile-confirm-title" className="text-lg font-extrabold text-white">
-                {pendingConfirmation.title}
-              </h3>
-              <button
-                type="button"
-                onClick={() => !isConfirming && setPendingConfirmation(null)}
-                aria-label="Close confirmation"
-                className="flex h-9 w-9 items-center justify-center rounded-full text-[#B3B3B3] hover:bg-[#121212] hover:text-white cursor-pointer"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="rounded-xl border border-[#1DB954]/30 bg-[#121212] px-4 py-3 text-xs text-[#B3B3B3]">
-              Simulated Payment Preview: No real card or bank charge is processed in this frontend prototype.
-            </div>
-
-            <div className="rounded-xl border border-white/10 bg-[#121212] p-4 space-y-2.5 text-sm">
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-[#B3B3B3]">Subscription</span>
-                <span className="font-semibold text-white">{pendingConfirmation.planName}</span>
-              </div>
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-[#B3B3B3]">Duration</span>
-                <span className="font-semibold text-white">{pendingConfirmation.durationLabel}</span>
-              </div>
-
-              {pendingConfirmation.mode === 'renewal' && (
-                <>
-                  {pendingConfirmation.recipientName && (
-                    <div className="flex items-center justify-between gap-4">
-                      <span className="text-[#B3B3B3]">Slot holder</span>
-                      <span className="font-semibold text-white">
-                        {pendingConfirmation.recipientName}
-                      </span>
-                    </div>
-                  )}
-                  <div className="flex items-center justify-between gap-4">
-                    <span className="text-[#B3B3B3]">Current renewal</span>
-                    <span className="font-mono text-xs text-[#B3B3B3] tabular-nums">
-                      {pendingConfirmation.currentRenewalDate}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-4">
-                    <span className="text-[#B3B3B3]">New renewal date</span>
-                    <span className="font-mono text-xs font-semibold text-[#1DB954] tabular-nums">
-                      {pendingConfirmation.newRenewalDate}
-                    </span>
-                  </div>
-                </>
-              )}
-
-              {pendingConfirmation.mode === 'gift' && (
-                <>
-                  <div className="flex items-center justify-between gap-4">
-                    <span className="text-[#B3B3B3]">Recipient</span>
-                    <span className="font-semibold text-white">
-                      {pendingConfirmation.recipientName}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-4">
-                    <span className="text-[#B3B3B3]">Recipient WhatsApp</span>
-                    <span className="font-mono text-xs text-white tabular-nums">
-                      {pendingConfirmation.recipientWhatsapp}
-                    </span>
-                  </div>
-                </>
-              )}
-
-              <div className="pt-3 border-t border-white/10 flex items-center justify-between gap-4">
-                <span className="font-bold text-white">Total amount</span>
-                <span className="font-mono text-xl font-extrabold text-[#1DB954] tabular-nums">
-                  {formatAmount(pendingConfirmation.amount, pendingConfirmation.currencySymbol)}
-                </span>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                disabled={isConfirming}
-                onClick={() => setPendingConfirmation(null)}
-                className="min-h-[46px] rounded-full border border-white/20 bg-[#121212] px-5 py-2.5 text-sm font-semibold text-white hover:border-white/40 cursor-pointer disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={isConfirming}
-                onClick={handleConfirmPendingPayment}
-                className="flex-1 inline-flex items-center justify-center gap-2 min-h-[46px] rounded-full bg-[#1DB954] px-6 py-2.5 text-sm font-bold text-black hover:bg-[#15803D] hover:text-white transition-colors cursor-pointer disabled:opacity-80"
-              >
-                {isConfirming ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                    <span>Recording...</span>
-                  </>
-                ) : (
-                  <span>Confirm Payment</span>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
       {/* Cancel Slot Confirmation Modal */}
       {pendingCancelSub && (
         <div

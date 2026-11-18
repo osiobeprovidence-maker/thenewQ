@@ -9,10 +9,8 @@ export const BRAND_INFO = {
   name: 'JOIN THE QUEUE',
   slogan: 'Get in. Get Premium. Enjoy.',
   supportWhatsappDisplay: '+234 800 000 0000',
-  supportEmailDisplay: 'support@jointhequeue.demo',
-  operatingHours: 'Monday â€“ Saturday, 9:00 AM â€“ 7:00 PM WAT',
-  demoAdminSender: 'JOIN THE QUEUE Admin',
-  demoHomeAddress: '14 Admiralty Way, Lekki Phase 1, Lagos (Demo Address)',
+  supportEmailDisplay: '',
+  operatingHours: 'Monday – Saturday, 9:00 AM – 7:00 PM WAT',
 };
 
 export const DEFAULT_SUPPORT_PERMISSIONS: SupportPermissions = {
@@ -63,13 +61,13 @@ export const FAQ_ITEMS: FaqItem[] = [
     id: 'how-to-order',
     question: 'How do I make an order?',
     answer:
-      'Click "Join Slot" on your preferred subscription card, enter your full name, email address, and WhatsApp phone number, review the subscription terms checkbox, and select "Continue to Checkout". On the summary screen, click "Confirm Order" to submit your request. Note that this prototype demonstrates the checkout flow in your browser without collecting real payments.',
+      'Select an available plan and enter your details. After reviewing the order total, continue to the secure payment provider. Your subscription is confirmed only after the provider verifies your payment.',
   },
   {
     id: 'receive-confirmation',
     question: 'How will I receive confirmation?',
     answer:
-      'Immediately after confirming your order, an on-screen confirmation summary is displayed with your reference number. Clicking Done takes you to your Profile where you can view your joined subscription, admin inbox messages, payment history, and renewal options.',
+      'After your payment is verified, your order reference and subscription status appear in your Profile. Payment history shows transactions confirmed by the payment provider.',
   },
   {
     id: 'whatsapp-group',
@@ -89,7 +87,7 @@ export function formatPlanPrice(plan: SubscriptionPlan): string {
   return `${plan.currencySymbol}${plan.priceMonthly.toLocaleString('en-NG')}/${plan.billingCycle}`;
 }
 
-export function formatAmount(amount: number, currencySymbol = 'â‚¦'): string {
+export function formatAmount(amount: number, currencySymbol = '₦'): string {
   return `${currencySymbol}${amount.toLocaleString('en-NG')}`;
 }
 

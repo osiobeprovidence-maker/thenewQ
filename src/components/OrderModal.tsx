@@ -31,7 +31,9 @@ interface OrderModalProps {
   onConfirmOrder: () => void;
   onStartNewOrder: () => void;
   onDoneToProfile: () => void;
-  checkoutMode: 'live' | 'demo';
+  checkoutMode: 'live' | 'unavailable';
+  checkoutUnavailableReason: string;
+  onRequestSignIn: () => void;
   isCheckoutPending: boolean;
   checkoutError: string | null;
 }
@@ -102,6 +104,8 @@ export function OrderModal({
   onStartNewOrder,
   onDoneToProfile,
   checkoutMode,
+  checkoutUnavailableReason,
+  onRequestSignIn,
   isCheckoutPending,
   checkoutError,
 }: OrderModalProps) {
@@ -154,7 +158,7 @@ export function OrderModal({
     : step === 'checkout' ? 2
     : step === 'awaiting-payment' ? 3
     : checkoutMode === 'live' ? 4
-    : 3;
+    : 2;
 
   return (
     <div
@@ -173,12 +177,12 @@ export function OrderModal({
         <div className="flex items-center justify-between gap-4 pb-4 border-b border-white/10">
           <div className="flex items-center gap-3 text-xs font-semibold">
             <span className="text-[#1DB954] font-mono tabular-nums">
-              Step {stepIndex} of {checkoutMode === 'live' ? 4 : 3}
+              Step {stepIndex} of {checkoutMode === 'live' ? 4 : 2}
             </span>
             <span aria-hidden="true" className="text-white/25">·</span>
             <span className="text-[#B3B3B3]">
               {step === 'form' && 'Register Details'}
-              {step === 'checkout' && (checkoutMode === 'live' ? 'Checkout' : 'Demo Checkout')}
+              {step === 'checkout' && (checkoutMode === 'live' ? 'Secure Checkout' : 'Checkout unavailable')}
               {step === 'awaiting-payment' && 'Awaiting Payment'}
               {step === 'success' && 'Order Confirmed'}
             </span>
@@ -411,23 +415,23 @@ export function OrderModal({
                 Checkout Summary
               </h2>
               <p className="mt-1 text-sm text-[#B3B3B3]">
-                Review your details before {checkoutMode === 'live' ? 'paying' : 'confirming'} your slot order.
+                Review your details before continuing to secure payment.
               </p>
             </div>
 
-            {checkoutMode === 'demo' ? (
+            {checkoutMode === 'live' ? (
               <div className="flex items-start gap-3 rounded-xl border border-[#1DB954]/30 bg-[#121212] px-4 py-3 text-xs text-[#B3B3B3]">
                 <CreditCard className="h-4 w-4 text-[#1DB954] shrink-0 mt-0.5" aria-hidden="true" />
                 <p className="leading-relaxed">
-                  Demo checkout — this catalogue entry is not connected to the live payment processor in this environment. No charge is made.
+                  You’ll continue to the secure payment provider. Your subscription activates only after payment is confirmed.
                 </p>
               </div>
             ) : (
-              <div className="flex items-start gap-3 rounded-xl border border-[#1DB954]/30 bg-[#121212] px-4 py-3 text-xs text-[#B3B3B3]">
-                <CreditCard className="h-4 w-4 text-[#1DB954] shrink-0 mt-0.5" aria-hidden="true" />
-                <p className="leading-relaxed">
-                  Secure checkout — you will be redirected to Bachs&apos; secure payment page to complete payment. Money only moves after the payment is verified server-side.
-                </p>
+              <div className="flex flex-col items-start gap-3 rounded-xl border border-amber-500/30 bg-[#121212] px-4 py-3 text-xs text-[#B3B3B3]">
+                <p className="leading-relaxed">{checkoutUnavailableReason}</p>
+                {!checkoutUnavailableReason.startsWith('This plan') && (
+                  <button type="button" onClick={onRequestSignIn} className="min-h-[38px] rounded-full bg-[#1DB954] px-4 py-2 text-xs font-bold text-black">Sign in to continue</button>
+                )}
               </div>
             )}
 
@@ -510,16 +514,16 @@ export function OrderModal({
               <button
                 type="button"
                 onClick={handleConfirm}
-                disabled={isCheckoutPending}
+                disabled={isCheckoutPending || checkoutMode !== 'live'}
                 className="w-full sm:flex-1 inline-flex items-center justify-center gap-2 min-h-[48px] rounded-full bg-[#1DB954] px-6 py-3.5 text-sm sm:text-base font-bold text-black transition-all duration-150 hover:bg-[#15803D] hover:text-white active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1DB954] cursor-pointer disabled:opacity-80"
               >
                 {isCheckoutPending ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                    <span>{checkoutMode === 'live' ? 'Opening secure checkout…' : 'Preparing summary…'}</span>
+                    <span>Opening secure checkout…</span>
                   </>
                 ) : (
-                  <span>{checkoutMode === 'live' ? 'Pay securely with Bachs' : 'Confirm Order'}</span>
+                  <span>{checkoutMode === 'live' ? 'Pay securely' : 'Secure checkout unavailable'}</span>
                 )}
               </button>
             </div>
@@ -562,7 +566,7 @@ export function OrderModal({
           </div>
         )}
 
-        {/* STEP 3: ORDER SUCCESS DEMONSTRATION SCREEN */}
+        {/* STEP 3: CONFIRMED ORDER SCREEN */}
         {step === 'success' && completedOrder && (
           <div className="mt-5 space-y-5 text-center">
             <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#1DB954]/15 border border-[#1DB954]/40 text-[#1DB954]">
@@ -576,11 +580,14 @@ export function OrderModal({
               <h2 id="order-modal-title" className="mt-1 text-2xl font-extrabold text-white tracking-tight">
                 {completedOrder.plan.status === 'waitlist'
                   ? 'Waitlist Request Recorded'
-                  : 'Order Demonstration Confirmed'}
+                  : 'Payment confirmed'}
               </h2>
               <p className="mt-2 text-sm text-[#B3B3B3] leading-relaxed">
-                Thank you, <span className="font-semibold text-white">{completedOrder.fullName}</span>. Your simulated order for{' '}
-                <span className="font-semibold text-white">{completedOrder.plan.name}</span> has been generated.
+                {completedOrder.plan.status === 'waitlist' ? (
+                  <>Thank you, <span className="font-semibold text-white">{completedOrder.fullName}</span>. Your request to join the waitlist for <span className="font-semibold text-white">{completedOrder.plan.name}</span> has been recorded. No payment was taken.</>
+                ) : (
+                  <>Thank you, <span className="font-semibold text-white">{completedOrder.fullName}</span>. Payment for <span className="font-semibold text-white">{completedOrder.plan.name}</span> has been verified.</>
+                )}
               </p>
             </div>
 
@@ -600,7 +607,7 @@ export function OrderModal({
                 </div>
               )}
               <div className="flex items-center justify-between gap-4">
-                <span className="text-[#B3B3B3]">Monthly Total</span>
+                <span className="text-[#B3B3B3]">Monthly price</span>
                 <span className="font-mono font-bold text-[#1DB954] tabular-nums">
                   {completedOrder.totalFormatted}
                 </span>
@@ -609,12 +616,6 @@ export function OrderModal({
                 <span className="text-[#B3B3B3]">WhatsApp Contact</span>
                 <span className="font-mono text-xs text-white tabular-nums">
                   {completedOrder.whatsappNumber}
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-[#B3B3B3]">Mode</span>
-                <span className="text-xs font-medium text-[#B3B3B3]">
-                  Frontend Prototype Preview (No Charge)
                 </span>
               </div>
             </div>
@@ -633,7 +634,7 @@ export function OrderModal({
                 onClick={onStartNewOrder}
                 className="w-full sm:w-auto min-h-[46px] rounded-full border border-white/20 bg-[#121212] px-5 py-3 text-sm font-semibold text-white transition-colors hover:border-[#1DB954] hover:text-[#1DB954] cursor-pointer"
               >
-                Place Another Demo Order
+                Place Another Order
               </button>
               <button
                 type="button"

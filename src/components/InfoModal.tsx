@@ -1,6 +1,5 @@
 import { useEffect } from 'react';
 import { Mail, MessageCircle, X } from 'lucide-react';
-import { BRAND_INFO } from '../data/subscriptions';
 import type { InfoModalType } from '../types/subscription';
 
 interface InfoModalProps {
@@ -59,29 +58,19 @@ export function InfoModal({ modalType, onClose }: InfoModalProps) {
           {modalType === 'contact' && (
             <>
               <p>
-                Need help with a subscription slot or order confirmation? Reach our support desk using the placeholder contact channels below.
+                Need help with a subscription slot or order confirmation? Support contact details will be published here when available.
               </p>
               <div className="space-y-3 rounded-xl border border-white/10 bg-[#121212] p-4">
                 <div className="flex items-center gap-3">
                   <MessageCircle className="h-5 w-5 text-[#1DB954] shrink-0" aria-hidden="true" />
-                  <div>
-                    <p className="text-xs text-[#B3B3B3]">WhatsApp Support Placeholder</p>
-                    <p className="font-mono font-semibold text-white">
-                      {BRAND_INFO.supportWhatsappDisplay}
-                    </p>
-                  </div>
+                  <p className="font-semibold text-white">WhatsApp support details are not available yet.</p>
                 </div>
                 <div className="flex items-center gap-3">
                   <Mail className="h-5 w-5 text-[#1DB954] shrink-0" aria-hidden="true" />
-                  <div>
-                    <p className="text-xs text-[#B3B3B3]">Support Email Placeholder</p>
-                    <p className="font-mono font-semibold text-white">
-                      {BRAND_INFO.supportEmailDisplay}
-                    </p>
-                  </div>
+                  <p className="font-semibold text-white">Email support details are not available yet.</p>
                 </div>
                 <p className="pt-2 border-t border-white/10 text-xs text-[#B3B3B3]">
-                  Support hours: {BRAND_INFO.operatingHours}
+                  Support hours will be listed here when support contact details are available.
                 </p>
               </div>
             </>
@@ -90,10 +79,10 @@ export function InfoModal({ modalType, onClose }: InfoModalProps) {
           {modalType === 'privacy' && (
             <>
               <p>
-                JOIN THE QUEUE respects your privacy. In this frontend demonstration, any name, email address, or WhatsApp phone number entered in the Join Slot form stays strictly in your current browser session state.
+                JOIN THE QUEUE uses the information you provide to manage your account, subscription requests, and support. Account and profile information is stored by the services that operate this platform.
               </p>
               <p>
-                No personal details are transmitted to external servers, stored in a database, or shared with third parties in this prototype.
+                Payments are handled by the payment provider. Do not enter payment card details into JOIN THE QUEUE forms. Information may be processed by service providers as needed to operate the platform and complete your request.
               </p>
             </>
           )}
@@ -104,7 +93,7 @@ export function InfoModal({ modalType, onClose }: InfoModalProps) {
                 JOIN THE QUEUE is an independent subscription-slot coordination platform and is not officially affiliated with Spotify or any third-party media provider.
               </p>
               <p>
-                Displayed prices, slot counts, and checkout confirmations on this website are simulated frontend demonstrations. Participation in any live subscription plan remains subject to individual eligibility requirements and the respective provider&apos;s terms of service.
+                Plan prices and availability are shown before checkout and may change. Your order is confirmed only after the payment provider verifies payment. Subscription access is also subject to the relevant provider&apos;s terms and eligibility requirements.
               </p>
             </>
           )}

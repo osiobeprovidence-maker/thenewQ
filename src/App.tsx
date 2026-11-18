@@ -16,12 +16,8 @@ import { useAuth } from './context/AuthContext';
 import { fetchLiveSubscriptionPlans, fetchUserTransactions } from './lib/subscriptionService';
 import { startBachsCheckout, fetchReservationStatus, cancelMyMembership } from './lib/paymentProvider';
 import {
-  BILLING_DURATIONS,
-  BRAND_INFO,
   DEFAULT_SUPPORT_PERMISSIONS,
   FAQ_ITEMS,
-  addMonthsToIso,
-  formatAmount,
   formatPlanPrice,
 } from './data/subscriptions';
 import {
@@ -46,7 +42,6 @@ import type {
   AppView,
   BillingDurationMonths,
   CompletedOrder,
-  GroupMember,
   InboxMessage,
   InfoModalType,
   InvitedPerson,
@@ -55,8 +50,8 @@ import type {
   PaymentRecord,
   PlanStatus,
   PlatformTransaction,
-  PortalRole,
   SponsoredSlot,
+  PortalRole,
   SubscriptionGroup,
   SubscriptionPlan,
   SupportPermissions,
@@ -77,62 +72,6 @@ function scrollToSection(sectionId: string) {
   if (target) {
     target.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
-}
-
-function generateReferenceId(prefix = 'JTQ'): string {
-  const randomCode = Math.floor(1000 + Math.random() * 9000);
-  return `${prefix}-${randomCode}`;
-}
-
-/** Ephemeral code for client-side demo groups only — never persisted. */
-function ephemeralGroupCode(): string {
-  const randomCode = Math.floor(1000 + Math.random() * 9000);
-  return `GFT-${randomCode}`;
-}
-
-function buildAdminInboxMessage({
-  referenceId,
-  planName,
-  receivedAt,
-  recipientName,
-  groupCode,
-  groupName,
-  inviteLink,
-  homeAddress,
-}: {
-  referenceId: string;
-  planName: string;
-  receivedAt: string;
-  recipientName?: string;
-  groupCode?: string;
-  groupName?: string;
-  inviteLink?: string;
-  homeAddress?: string;
-}): InboxMessage {
-  const targetText = recipientName
-    ? `for ${recipientName}'s ${planName} slot`
-    : `for your ${planName} slot`;
-  const groupText = groupCode
-    ? ` in ${groupName ?? 'your group'} (Group ${groupCode})`
-    : '';
-
-  return {
-    id: `msg-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-    referenceId,
-    groupCode,
-    sender: BRAND_INFO.demoAdminSender,
-    subject: recipientName
-      ? `Slot Access Details for ${recipientName} — ${planName}`
-      : `Your Slot Access Details — ${planName}`,
-    planName,
-    recipientName,
-    body: `Hello! Admin has prepared the onboarding invite link and home address ${targetText}${groupText} (Ref #${referenceId}). Use the copy buttons below whenever you are ready to complete setup.`,
-    inviteLink:
-      inviteLink || `https://jointhequeue.demo/slot-invite/${referenceId.toLowerCase()}`,
-    homeAddress: homeAddress || BRAND_INFO.demoHomeAddress,
-    receivedAt,
-    isRead: false,
-  };
 }
 
 export default function App() {
@@ -193,7 +132,7 @@ export default function App() {
   const [inboxMessages, setInboxMessages] = useState<InboxMessage[]>([]);
   const [paymentHistory, setPaymentHistory] = useState<PaymentRecord[]>([]);
   const [invitedPeople, setInvitedPeople] = useState<InvitedPerson[]>([]);
-  const [sponsoredSlots, setSponsoredSlots] = useState<SponsoredSlot[]>([]);
+  const [sponsoredSlots] = useState<SponsoredSlot[]>([]);
 
   // Track which subscription plans came from a successful live Supabase fetch.
   // A plan is only “live” if the backend supplied it and its id is a UUID.
@@ -293,13 +232,7 @@ export default function App() {
     }
   }, [currentUser, authProfile]);
 
-  // Live checkout only runs when:
-  //   - demo mode is not forced (VITE_DEMO_MODE), and
-  //   - Firebase auth produced a signed-in user, and
-  //   - the selected plan came from a successful live Supabase fetch, and
-  //   - its id is a UUID (never a bundled local seed slug).
-  // Anything else falls back to clearly-labelled demo mode — never to a
-  // phantom "successful" checkout.
+  // Payments are only available for signed-in users and published database plans.
   const chosenPlanForCheckout = plans.find((p) => p.id === formData.planId);
   const chosenPlanIsLive =
     chosenPlanForCheckout != null && livePlanIds.has(chosenPlanForCheckout.id);
@@ -308,8 +241,11 @@ export default function App() {
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
       chosenPlanForCheckout.id
     );
-  const checkoutMode: 'live' | 'demo' =
-    currentUser && chosenPlanIsLive && isLivePlanId ? 'live' : 'demo';
+  const checkoutMode: 'live' | 'unavailable' =
+    currentUser && chosenPlanIsLive && isLivePlanId ? 'live' : 'unavailable';
+  const checkoutUnavailableReason = !currentUser
+    ? 'Sign in to continue to secure checkout. No payment has been taken.'
+    : 'This plan is not connected to secure checkout yet. No payment has been taken.';
 
   const navigateToSection = (sectionId: string) => {
     if (currentView !== 'landing') {
@@ -348,70 +284,6 @@ export default function App() {
     openJoinModalForPlan(firstAvailablePlan);
   };
 
-  const assignMemberToPlanGroup = (
-    chosenPlan: SubscriptionPlan,
-    memberInput: Omit<GroupMember, 'isLeader'>,
-    preferredGroupCode?: string
-  ): SubscriptionGroup => {
-    const normalizedPreferred = preferredGroupCode?.trim().toUpperCase();
-    const openGroup =
-      (normalizedPreferred
-        ? groups.find(
-            (grp) =>
-              grp.planId === chosenPlan.id &&
-              grp.groupCode.toUpperCase() === normalizedPreferred &&
-              grp.members.filter((m) => m.paymentStatus !== 'Cancelled').length < grp.maxSlots
-          )
-        : undefined) ??
-      groups.find(
-        (grp) =>
-          grp.planId === chosenPlan.id &&
-          grp.members.filter((m) => m.paymentStatus !== 'Cancelled').length < grp.maxSlots
-      );
-
-    if (openGroup) {
-      const hasActiveLeader = openGroup.members.some(
-        (m) => m.isLeader && m.paymentStatus !== 'Cancelled'
-      );
-      const updatedGroup: SubscriptionGroup = {
-        ...openGroup,
-        members: [
-          ...openGroup.members,
-          {
-            ...memberInput,
-            isLeader: !hasActiveLeader,
-          },
-        ],
-      };
-      setGroups((prev) =>
-        prev.map((grp) => (grp.id === openGroup.id ? updatedGroup : grp))
-      );
-      return updatedGroup;
-    }
-
-    const newGroupCode = ephemeralGroupCode();
-    const planGroupCount = groups.filter((g) => g.planId === chosenPlan.id).length + 1;
-    const newGroup: SubscriptionGroup = {
-      id: `grp-${Date.now()}`,
-      groupName: `${chosenPlan.name} Group ${String(planGroupCount).padStart(2, '0')}`,
-      groupCode: newGroupCode,
-      planId: chosenPlan.id,
-      planName: chosenPlan.name,
-      homeAddress: BRAND_INFO.demoHomeAddress,
-      inviteLink: `https://jointhequeue.demo/slot-invite/${newGroupCode.toLowerCase()}`,
-      maxSlots: chosenPlan.totalSlots,
-      createdAt: new Date().toISOString(),
-      members: [
-        {
-          ...memberInput,
-          isLeader: true,
-        },
-      ],
-    };
-    setGroups((prev) => [newGroup, ...prev]);
-    return newGroup;
-  };
-
   const restoreOnePlanSlot = (planId: string) => {
     setPlans((prevPlans) =>
       prevPlans.map((plan) => {
@@ -430,141 +302,10 @@ export default function App() {
     );
   };
 
-  // Locals-only order handler — used in demo mode where no real backend exists.
-  const handleConfirmOrderLocal = () => {
-    const chosenPlan = plans.find((p) => p.id === formData.planId) ?? plans[0];
-    const nowIso = new Date().toISOString();
-    const referenceId = generateReferenceId('JTQ');
-    const newSubId = `sub-${Date.now()}`;
-    const trimmedName = formData.fullName.trim();
-    const trimmedEmail = formData.email.trim();
-    const trimmedWhatsapp = formData.whatsappNumber.trim();
-
-    const targetGroup = assignMemberToPlanGroup(
-      chosenPlan,
-      {
-        id: `mem-${Date.now()}`,
-        fullName: trimmedName,
-        email: trimmedEmail,
-        whatsappNumber: trimmedWhatsapp,
-        referenceId,
-        paymentStatus: 'Paid',
-        joinedAt: nowIso,
-        payerLabel: 'Self',
-        linkedSubscriptionId: newSubId,
-        amountPaid: chosenPlan.priceMonthly,
-        contacted: false,
-      },
-      formData.groupCode
-    );
-
-    const newOrder: CompletedOrder = {
-      referenceId,
-      fullName: trimmedName,
-      email: trimmedEmail,
-      whatsappNumber: trimmedWhatsapp,
-      plan: chosenPlan,
-      totalFormatted: formatPlanPrice(chosenPlan),
-      createdAt: nowIso,
-      groupCode: targetGroup.groupCode,
-      groupName: targetGroup.groupName,
-    };
-
-    if (chosenPlan.status === 'available' && chosenPlan.slotsOpen > 0) {
-      setPlans((prevPlans) =>
-        prevPlans.map((plan) => {
-          if (plan.id !== chosenPlan.id) return plan;
-          const nextOpen = Math.max(0, plan.slotsOpen - 1);
-          return {
-            ...plan,
-            slotsOpen: nextOpen,
-            availabilityLabel:
-              nextOpen > 0
-                ? `Available now · ${nextOpen} ${nextOpen === 1 ? 'slot' : 'slots'} remaining`
-                : 'Current batch full · Waitlist open',
-            status: nextOpen > 0 ? 'available' : 'waitlist',
-          };
-        })
-      );
-    }
-
-    // Create or update user profile with latest contact details
-    setUserProfile((prev) => ({
-      fullName: newOrder.fullName,
-      email: newOrder.email,
-      whatsappNumber: newOrder.whatsappNumber,
-      joinedAt: prev?.joinedAt ?? nowIso,
-      inviteCode: prev?.inviteCode ?? referenceId,
-    }));
-
-    // Add joined subscription to profile
-    const newSubscription: ActiveSubscription = {
-      id: newSubId,
-      referenceId,
-      plan: chosenPlan,
-      status: chosenPlan.status === 'waitlist' ? 'waitlist' : 'active',
-      joinedAt: nowIso,
-      nextRenewalDate: addMonthsToIso(nowIso, 1),
-      lastDurationMonths: 1,
-      payerType: 'self',
-      groupId: targetGroup.id,
-      groupCode: targetGroup.groupCode,
-      groupName: targetGroup.groupName,
-    };
-    setActiveSubscriptions((prev) => [newSubscription, ...prev]);
-
-    // Deliver initial admin inbox message with group invite link & home address
-    const adminMsg = buildAdminInboxMessage({
-      referenceId,
-      planName: chosenPlan.name,
-      receivedAt: nowIso,
-      groupCode: targetGroup.groupCode,
-      groupName: targetGroup.groupName,
-      inviteLink: targetGroup.inviteLink,
-      homeAddress: targetGroup.homeAddress,
-    });
-    setInboxMessages((prev) => [adminMsg, ...prev]);
-
-    // Record initial transaction in payment history
-    const newPayment: PaymentRecord = {
-      id: `pay-${Date.now()}`,
-      referenceId,
-      date: nowIso,
-      planName: chosenPlan.name,
-      durationLabel: '1 Month',
-      months: 1,
-      amount: chosenPlan.priceMonthly,
-      currencySymbol: chosenPlan.currencySymbol,
-      kind: 'initial',
-      status: chosenPlan.status === 'waitlist' ? 'Waitlist Recorded' : 'Confirmed (Demo)',
-    };
-    setPaymentHistory((prev) => [newPayment, ...prev]);
-
-    setPlatformTransactions((prev) => [
-      {
-        id: `tx-${Date.now()}`,
-        referenceId,
-        date: nowIso,
-        memberName: trimmedName,
-        planName: chosenPlan.name,
-        groupCode: targetGroup.groupCode,
-        source: 'User Checkout',
-        amount: chosenPlan.priceMonthly,
-        currencySymbol: chosenPlan.currencySymbol,
-        status: chosenPlan.status === 'waitlist' ? 'Waitlist Recorded' : 'Confirmed (Demo)',
-      },
-      ...prev,
-    ]);
-
-    setCompletedOrder(newOrder);
-    setOrderStep('success');
-  };
-
-  // Dispatch: real checkout (live mode) hooks up to Bachs via the backend callable.
-  // Demo mode keeps the pre-wired local flow.
+  // Start checkout only when the published plan and signed-in account are eligible.
   const handleConfirmOrder = () => {
-    if (checkoutMode === 'demo') {
-      handleConfirmOrderLocal();
+    if (checkoutMode !== 'live') {
+      setCheckoutError(checkoutUnavailableReason);
       return;
     }
 
@@ -592,7 +333,7 @@ export default function App() {
           setCheckoutError(result.ok ? 'Malformed response from payment server.' : result.error);
           return;
         }
-        // Redirect to sandbox checkout page — payment confirmed via webhook, then the
+        // Redirect to the hosted checkout page — payment confirmed via webhook, then the
         // reservation flips to `fulfilled` and the Profile inbox + subscriptions update.
         window.location.assign(result.checkoutUrl);
       })
@@ -666,88 +407,13 @@ export default function App() {
     setOrderStep('form');
   };
 
-  const handleTriggerNextPayment = (subscriptionId: string, months: BillingDurationMonths) => {
-    const targetSub = activeSubscriptions.find((s) => s.id === subscriptionId);
-    if (!targetSub || targetSub.status === 'cancelled') return;
-
-    const durationObj =
-      BILLING_DURATIONS.find((d) => d.months === months) ?? BILLING_DURATIONS[0];
-    const amount = targetSub.plan.priceMonthly * months;
-    const referenceId = generateReferenceId('PAY');
-    const nowIso = new Date().toISOString();
-
-    setActiveSubscriptions((prev) =>
-      prev.map((sub) => {
-        if (sub.id !== subscriptionId) return sub;
-        return {
-          ...sub,
-          status: 'active',
-          nextRenewalDate: addMonthsToIso(sub.nextRenewalDate, months),
-          lastDurationMonths: months,
-        };
-      })
-    );
-
-    if (targetSub.groupId) {
-      setGroups((prev) =>
-        prev.map((grp) =>
-          grp.id !== targetSub.groupId
-            ? grp
-            : {
-                ...grp,
-                members: grp.members.map((m) =>
-                  m.linkedSubscriptionId === subscriptionId
-                    ? { ...m, paymentStatus: 'Paid' }
-                    : m
-                ),
-              }
-        )
-      );
-    }
-
-    const renewalPayment: PaymentRecord = {
-      id: `pay-${Date.now()}`,
-      referenceId,
-      date: nowIso,
-      planName: targetSub.plan.name,
-      durationLabel: durationObj.label,
-      months,
-      amount,
-      currencySymbol: targetSub.plan.currencySymbol,
-      kind: 'renewal',
-      recipientName:
-        targetSub.payerType === 'recipient' ? targetSub.recipientName : undefined,
-      status: 'Confirmed (Demo)',
-    };
-    setPaymentHistory((prev) => [renewalPayment, ...prev]);
-
-    setPlatformTransactions((prev) => [
-      {
-        id: `tx-${Date.now()}`,
-        referenceId,
-        date: nowIso,
-        memberName:
-          targetSub.payerType === 'recipient' && targetSub.recipientName
-            ? targetSub.recipientName
-            : userProfile?.fullName ?? 'Member',
-        planName: targetSub.plan.name,
-        groupCode: targetSub.groupCode,
-        source: 'Renewal',
-        amount,
-        currencySymbol: targetSub.plan.currencySymbol,
-        status: 'Confirmed (Demo)',
-      },
-      ...prev,
-    ]);
-  };
-
   const handleCancelSubscriptionSlot = (subscriptionId: string) => {
     const targetSub = activeSubscriptions.find((s) => s.id === subscriptionId);
     if (!targetSub || targetSub.status === 'cancelled') return;
 
     // In live checkout mode, persist the cancellation before flipping UI state.
     // In live checkout mode, persist the cancellation before flipping UI state.
-    if (checkoutMode === 'live') {
+    if (currentUser) {
       cancelMyMembership({ referenceId: targetSub.referenceId }).catch((err) => {
         console.error('[App] cancelMyMembership failed:', err);
       });
@@ -794,175 +460,16 @@ export default function App() {
     );
   };
 
-  const handleSimulateAdminMessage = (subscriptionId: string) => {
-    const targetSub =
-      activeSubscriptions.find((s) => s.id === subscriptionId) ?? activeSubscriptions[0];
-    if (!targetSub) return;
-
-    const matchedGroup = targetSub.groupId
-      ? groups.find((g) => g.id === targetSub.groupId)
-      : undefined;
-
-    const freshMsg = buildAdminInboxMessage({
-      referenceId: generateReferenceId('ADM'),
-      planName: targetSub.plan.name,
-      receivedAt: new Date().toISOString(),
-      recipientName:
-        targetSub.payerType === 'recipient' ? targetSub.recipientName : undefined,
-      groupCode: matchedGroup?.groupCode ?? targetSub.groupCode,
-      groupName: matchedGroup?.groupName ?? targetSub.groupName,
-      inviteLink: matchedGroup?.inviteLink,
-      homeAddress: matchedGroup?.homeAddress,
-    });
-    setInboxMessages((prev) => [freshMsg, ...prev]);
-  };
-
   const handleSendInvite = (name: string, contact: string) => {
     const newInvite: InvitedPerson = {
       id: `inv-${Date.now()}`,
       name,
       contact,
-      inviteCode: userProfile?.inviteCode ?? generateReferenceId('INV'),
+      inviteCode: userProfile?.inviteCode ?? '',
       sentAt: new Date().toISOString(),
-      status: 'Invite Sent (Demo)',
+      status: 'Invite link ready',
     };
     setInvitedPeople((prev) => [newInvite, ...prev]);
-  };
-
-  const handlePayForSomebody = ({
-    planId,
-    months,
-    recipientName,
-    recipientEmail,
-    recipientWhatsapp,
-    note,
-  }: {
-    planId: string;
-    months: BillingDurationMonths;
-    recipientName: string;
-    recipientEmail: string;
-    recipientWhatsapp: string;
-    note: string;
-  }): string => {
-    const chosenPlan = plans.find((p) => p.id === planId) ?? plans[0];
-    const durationObj =
-      BILLING_DURATIONS.find((d) => d.months === months) ?? BILLING_DURATIONS[0];
-    const amount = chosenPlan.priceMonthly * months;
-    const referenceId = generateReferenceId('GFT');
-    const nowIso = new Date().toISOString();
-    const newSubId = `sub-gift-${Date.now()}`;
-
-    const targetGroup = assignMemberToPlanGroup(chosenPlan, {
-      id: `mem-${Date.now()}`,
-      fullName: recipientName,
-      email: recipientEmail,
-      whatsappNumber: recipientWhatsapp,
-      referenceId,
-      paymentStatus: 'Paid',
-      joinedAt: nowIso,
-      payerLabel: userProfile ? `Paid by ${userProfile.fullName}` : 'Sponsored',
-      linkedSubscriptionId: newSubId,
-      amountPaid: amount,
-      contacted: false,
-    });
-
-    // Add to managed subscriptions so the payer can manage its renewals directly
-    const recipientSub: ActiveSubscription = {
-      id: newSubId,
-      referenceId,
-      plan: chosenPlan,
-      status: chosenPlan.status === 'waitlist' ? 'waitlist' : 'active',
-      joinedAt: nowIso,
-      nextRenewalDate: addMonthsToIso(nowIso, months),
-      lastDurationMonths: months,
-      payerType: 'recipient',
-      recipientName,
-      recipientEmail,
-      recipientWhatsapp,
-      note: note || undefined,
-      groupId: targetGroup.id,
-      groupCode: targetGroup.groupCode,
-      groupName: targetGroup.groupName,
-    };
-    setActiveSubscriptions((prev) => [recipientSub, ...prev]);
-
-    if (chosenPlan.status === 'available' && chosenPlan.slotsOpen > 0) {
-      setPlans((prevPlans) =>
-        prevPlans.map((plan) => {
-          if (plan.id !== chosenPlan.id) return plan;
-          const nextOpen = Math.max(0, plan.slotsOpen - 1);
-          return {
-            ...plan,
-            slotsOpen: nextOpen,
-            availabilityLabel:
-              nextOpen > 0
-                ? `Available now · ${nextOpen} ${nextOpen === 1 ? 'slot' : 'slots'} remaining`
-                : 'Current batch full · Waitlist open',
-            status: nextOpen > 0 ? 'available' : 'waitlist',
-          };
-        })
-      );
-    }
-
-    // Deliver admin inbox copy with group invite link & address for the sponsored slot
-    const adminMsg = buildAdminInboxMessage({
-      referenceId,
-      planName: chosenPlan.name,
-      receivedAt: nowIso,
-      recipientName,
-      groupCode: targetGroup.groupCode,
-      groupName: targetGroup.groupName,
-      inviteLink: targetGroup.inviteLink,
-      homeAddress: targetGroup.homeAddress,
-    });
-    setInboxMessages((prev) => [adminMsg, ...prev]);
-
-    const sponsored: SponsoredSlot = {
-      id: `gift-${Date.now()}`,
-      subscriptionId: newSubId,
-      referenceId,
-      recipientName,
-      recipientContact: `${recipientEmail} · ${recipientWhatsapp}`,
-      planName: chosenPlan.name,
-      durationLabel: durationObj.label,
-      amountFormatted: formatAmount(amount, chosenPlan.currencySymbol),
-      paidAt: nowIso,
-      note: note || undefined,
-    };
-    setSponsoredSlots((prev) => [sponsored, ...prev]);
-
-    const giftPayment: PaymentRecord = {
-      id: `pay-${Date.now()}`,
-      referenceId,
-      date: nowIso,
-      planName: chosenPlan.name,
-      durationLabel: durationObj.label,
-      months,
-      amount,
-      currencySymbol: chosenPlan.currencySymbol,
-      kind: 'gift',
-      recipientName,
-      status: 'Confirmed (Demo)',
-    };
-    setPaymentHistory((prev) => [giftPayment, ...prev]);
-
-    setPlatformTransactions((prev) => [
-      {
-        id: `tx-${Date.now()}`,
-        referenceId,
-        date: nowIso,
-        memberName: recipientName,
-        planName: chosenPlan.name,
-        groupCode: targetGroup.groupCode,
-        source: 'Paid for Somebody',
-        amount,
-        currencySymbol: chosenPlan.currencySymbol,
-        status: 'Confirmed (Demo)',
-      },
-      ...prev,
-    ]);
-
-    return newSubId;
   };
 
   // ADMIN HANDLERS
@@ -1275,12 +782,9 @@ export default function App() {
             onOpenAdminConsole={currentUser && canOpenStaffConsole ? openAdminView : undefined}
             staffAccess={staffAccess}
             designatedSuperAdminAvailable={designatedSuperAdminAvailable && staffAccess === null}
-            onTriggerNextPayment={handleTriggerNextPayment}
             onCancelSubscriptionSlot={handleCancelSubscriptionSlot}
             onMarkInboxRead={handleMarkInboxRead}
-            onSimulateAdminMessage={handleSimulateAdminMessage}
             onSendInvite={handleSendInvite}
-            onPayForSomebody={handlePayForSomebody}
             phoneVerified={authProfile?.phone_verified ?? false}
             onSavePhone={async (phone) => {
               await updateUserProfile({ phone, phone_verified: false });
@@ -1336,6 +840,8 @@ export default function App() {
         onStartNewOrder={handleStartNewOrder}
         onDoneToProfile={handleDoneToProfile}
         checkoutMode={checkoutMode}
+        checkoutUnavailableReason={checkoutUnavailableReason}
+        onRequestSignIn={() => setAuthModalOpen(true)}
         isCheckoutPending={isCheckoutPending}
         checkoutError={checkoutError}
       />
