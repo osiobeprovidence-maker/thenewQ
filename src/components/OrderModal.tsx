@@ -108,7 +108,7 @@ export function OrderModal({
   const [errors, setErrors] = useState<FormErrors>({});
 
   const selectedPlan = plans.find((p) => p.id === formData.planId) ?? plans[0];
-  const isWaitlistPlan = selectedPlan.status === 'waitlist';
+  const isWaitlistPlan = selectedPlan?.status === 'waitlist';
 
   useEffect(() => {
     setErrors({});
@@ -129,7 +129,9 @@ export function OrderModal({
     };
   }, [isOpen, onClose]);
 
-  if (!isOpen) return null;
+  // Plans load asynchronously from the live catalog. The modal stays mounted
+  // while that request is in flight, so there may briefly be no selected plan.
+  if (!isOpen || !selectedPlan) return null;
 
   const handleFormSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
