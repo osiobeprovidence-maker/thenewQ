@@ -102,7 +102,7 @@ BEGIN
     RAISE EXCEPTION 'Approve the member before recording payment.';
   END IF;
 
-  IF p_paid AND v_membership.payment_status <> 'Paid' THEN
+  IF p_paid AND coalesce(v_membership.payment_status, 'Unpaid') <> 'Paid' THEN
     SELECT s.id, p.name, p.monthly_price, p.currency
       INTO v_slot_id, v_product_name, v_amount, v_currency
     FROM public.slots s
@@ -136,7 +136,7 @@ BEGIN
         actor
       );
     END IF;
-  ELSIF NOT p_paid AND v_membership.payment_status = 'Paid' THEN
+  ELSIF NOT p_paid AND coalesce(v_membership.payment_status, 'Unpaid') = 'Paid' THEN
     UPDATE public.slot_memberships
     SET payment_status = 'Unpaid', updated_at = now()
     WHERE id = p_membership_id;
